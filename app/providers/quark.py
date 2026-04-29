@@ -681,6 +681,108 @@ def create_quark_folder(cookie: str, cid: str = "0", folder_name: str = "") -> D
         mark_cookie_health_failure("quark", exc, trigger="runtime:create_quark_folder")
         raise
 
+
+def _validate_quark_entry_name(value: str) -> str:
+    normalized_name = sanitize_115_folder_name(value, fallback="")
+    if not normalized_name:
+        raise RuntimeError("文件名称不能为空")
+    if len(normalized_name) > 240:
+        raise RuntimeError("文件名称过长")
+    return normalized_name
+
+
+def rename_quark_entry(cookie: str, entry_id: str, new_name: str, parent_id: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("Quark Cookie 未配置")
+    normalized_id = str(entry_id or "").strip()
+    if not normalized_id:
+        raise RuntimeError("文件 ID 不能为空")
+    normalized_name = _validate_quark_entry_name(new_name)
+    try:
+        headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
+        url = _build_quark_api_url("/1/clouddrive/file/rename")
+        response = _request_quark_json_payload(
+            url,
+            {"fid": normalized_id, "file_name": normalized_name},
+            headers,
+            timeout=45,
+            method="POST",
+            fallback="夸克重命名失败",
+        )
+        if not _is_quark_success(response):
+            raise RuntimeError(_extract_quark_error(response, "夸克重命名失败"))
+        mark_cookie_health_success("quark", trigger="runtime:rename_quark_entry")
+        return {"id": normalized_id, "name": normalized_name, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("quark", exc, trigger="runtime:rename_quark_entry")
+        raise
+
+
+def move_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("Quark Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要移动的文件")
+    target_id = str(target_cid or "0").strip() or "0"
+    try:
+        headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
+        url = _build_quark_api_url("/1/clouddrive/file/move")
+        response = _request_quark_json_payload(
+            url,
+            {
+                "action_type": 1,
+                "to_pdir_fid": target_id,
+                "fid_list": ids,
+                "exclude_fids": [],
+            },
+            headers,
+            timeout=60,
+            method="POST",
+            fallback="夸克移动失败",
+        )
+        if not _is_quark_success(response):
+            raise RuntimeError(_extract_quark_error(response, "夸克移动失败"))
+        mark_cookie_health_success("quark", trigger="runtime:move_quark_entries")
+        return {"ids": ids, "target_cid": target_id, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("quark", exc, trigger="runtime:move_quark_entries")
+        raise
+
+
+def delete_quark_entries(cookie: str, entry_ids: List[str], parent_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("Quark Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要删除的文件")
+    try:
+        headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
+        url = _build_quark_api_url("/1/clouddrive/file/delete")
+        response = _request_quark_json_payload(
+            url,
+            {
+                "action_type": 2,
+                "filelist": ids,
+                "exclude_fids": [],
+            },
+            headers,
+            timeout=60,
+            method="POST",
+            fallback="夸克删除失败",
+        )
+        if not _is_quark_success(response):
+            raise RuntimeError(_extract_quark_error(response, "夸克删除失败"))
+        mark_cookie_health_success("quark", trigger="runtime:delete_quark_entries")
+        return {"ids": ids, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("quark", exc, trigger="runtime:delete_quark_entries")
+        raise
+
+
 def ensure_quark_folder_id_by_path(cookie: str, relative_path: str) -> str:
     normalized_path = normalize_relative_path(relative_path)
     if not normalized_path:

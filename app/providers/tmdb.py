@@ -283,6 +283,27 @@ def build_tmdb_aliases(detail: Dict[str, Any], media_type: str) -> List[str]:
                 aliases.append(title)
     return unique_preserve_order(aliases)[:24]
 
+
+def pick_tmdb_translation_title(detail: Dict[str, Any], language_prefixes: Tuple[str, ...]) -> str:
+    translations_root = detail.get("translations", {}) if isinstance(detail.get("translations"), dict) else {}
+    translations = translations_root.get("translations", []) if isinstance(translations_root.get("translations"), list) else []
+    normalized_prefixes = tuple(str(item or "").strip().lower() for item in language_prefixes if str(item or "").strip())
+    for item in translations:
+        if not isinstance(item, dict):
+            continue
+        iso_639_1 = str(item.get("iso_639_1", "") or "").strip().lower()
+        iso_3166_1 = str(item.get("iso_3166_1", "") or "").strip().lower()
+        locale_key = "-".join(part for part in (iso_639_1, iso_3166_1) if part)
+        if not any(locale_key.startswith(prefix) or iso_639_1 == prefix for prefix in normalized_prefixes):
+            continue
+        data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+        for field in ("title", "name", "original_title", "original_name"):
+            title = str(data.get(field, "") or "").strip()
+            if title:
+                return title
+    return ""
+
+
 def infer_tmdb_episode_mode(detail: Dict[str, Any]) -> str:
     genres = detail.get("genres", []) if isinstance(detail.get("genres"), list) else []
     genre_names = " ".join(str((genre or {}).get("name", "") or "") for genre in genres if isinstance(genre, dict))
@@ -301,6 +322,8 @@ def build_tmdb_task_binding(detail: Dict[str, Any], media_type: str = "") -> Dic
         "tmdb_media_type": normalized_media_type,
         "tmdb_title": str(detail.get("title", "") or "").strip(),
         "tmdb_original_title": str(detail.get("original_title", "") or "").strip(),
+        "tmdb_localized_title": str(detail.get("localized_title", "") or detail.get("title", "") or "").strip(),
+        "tmdb_english_title": str(detail.get("english_title", "") or "").strip(),
         "tmdb_year": normalize_tmdb_year(detail.get("year", "")),
         "tmdb_aliases": detail.get("aliases", []) if isinstance(detail.get("aliases"), list) else [],
         "tmdb_total_episodes": max(0, parse_int(detail.get("total_episodes", 0) or 0, 0)),
@@ -342,10 +365,14 @@ def get_tmdb_media_detail(
     aliases = build_tmdb_aliases(detail, normalized_media_type)
     title = str(normalized.get("title", "") or "").strip()
     original_title = str(normalized.get("original_title", "") or "").strip()
+    english_title = pick_tmdb_translation_title(detail, ("en",)) or (original_title if original_title and not contains_cjk_text(original_title) else "")
+    localized_title = title
     aliases = [alias for alias in aliases if alias not in {title, original_title}]
     payload = {
         **normalized,
         "aliases": aliases,
+        "localized_title": localized_title,
+        "english_title": english_title,
         "status": str(detail.get("status", "") or "").strip(),
         "total_episodes": 0,
         "total_seasons": 0,

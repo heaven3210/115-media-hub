@@ -268,6 +268,54 @@ def ensure_db() -> None:
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scraper_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            status_detail TEXT NOT NULL DEFAULT '',
+            total_actions INTEGER NOT NULL DEFAULT 0,
+            succeeded_actions INTEGER NOT NULL DEFAULT 0,
+            failed_actions INTEGER NOT NULL DEFAULT 0,
+            rollback_succeeded_actions INTEGER NOT NULL DEFAULT 0,
+            rollback_failed_actions INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '',
+            started_at TEXT NOT NULL DEFAULT '',
+            finished_at TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{}',
+            tmdb_json TEXT NOT NULL DEFAULT '{}',
+            plan_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scraper_job_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            action_index INTEGER NOT NULL DEFAULT 0,
+            provider TEXT NOT NULL DEFAULT '',
+            entry_id TEXT NOT NULL DEFAULT '',
+            is_dir INTEGER NOT NULL DEFAULT 0,
+            old_parent_id TEXT NOT NULL DEFAULT '',
+            old_name TEXT NOT NULL DEFAULT '',
+            old_path TEXT NOT NULL DEFAULT '',
+            new_parent_id TEXT NOT NULL DEFAULT '',
+            new_name TEXT NOT NULL DEFAULT '',
+            new_path TEXT NOT NULL DEFAULT '',
+            target_parent_path TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            status_detail TEXT NOT NULL DEFAULT '',
+            rollback_status TEXT NOT NULL DEFAULT '',
+            rollback_detail TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '',
+            response_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
     cursor.execute("PRAGMA table_info(resource_jobs)")
     job_columns = {str(row[1]) for row in cursor.fetchall()}
     if "extra_json" not in job_columns:
@@ -305,6 +353,9 @@ def ensure_db() -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_share_entries_cache_share_cid ON share_entries_cache(share_code, cid)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_notification_dedupe_expires_at ON notification_dedupe(expires_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_notification_dedupe_scene ON notification_dedupe(scene, task_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scraper_jobs_created_at ON scraper_jobs(created_at DESC)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scraper_jobs_status ON scraper_jobs(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_scraper_job_actions_job ON scraper_job_actions(job_id, action_index)")
     cursor.execute(
         """
         SELECT id, last_seen_at, extra_json

@@ -867,6 +867,7 @@
         void loadSettingsTabModule();
         void loadMonitorTabModule();
         void loadSubscriptionTabModule();
+        void loadScraperTabModule();
         void loadResourceTabModule();
         const initPromise = init();
         syncResourceBackTopButton();

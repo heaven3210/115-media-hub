@@ -1,0 +1,160 @@
+import asyncio
+from typing import Any, Dict
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from ..background import submit_background
+from ..core import parse_int
+from ..services.scraper import (
+    build_scraper_providers_payload,
+    build_scraper_rename_plan,
+    create_scraper_folder,
+    create_scraper_job_from_plan,
+    delete_scraper_entries,
+    get_scraper_jobs_state,
+    identify_scraper_media,
+    list_scraper_entries,
+    move_scraper_entries,
+    rename_scraper_entry,
+    rollback_scraper_job,
+    run_scraper_job,
+)
+
+router = APIRouter()
+
+
+def _error_response(exc: Exception, status_code: int = 400) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"ok": False, "msg": str(exc)})
+
+
+@router.get("/scraper/providers")
+async def get_scraper_providers_endpoint() -> Dict[str, Any]:
+    try:
+        return await asyncio.to_thread(build_scraper_providers_payload)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.get("/scraper/{provider}/entries")
+async def get_scraper_entries_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    cid = str(request.query_params.get("cid", "0") or "0").strip() or "0"
+    force_refresh = request.query_params.get("force_refresh") == "1"
+    keyword = str(request.query_params.get("q", "") or "").strip()
+    try:
+        return await asyncio.to_thread(list_scraper_entries, provider, cid, force_refresh, keyword)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/folders")
+async def create_scraper_folder_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    cid = str(data.get("cid", "0") or "0").strip() or "0"
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "文件夹名称不能为空"})
+    try:
+        return await asyncio.to_thread(create_scraper_folder, provider, cid, name)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/rename")
+async def rename_scraper_entry_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    entry_id = str(data.get("entry_id", "") or "").strip()
+    parent_id = str(data.get("parent_id", "") or "").strip()
+    name = str(data.get("name", "") or "").strip()
+    if not entry_id:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "文件 ID 不能为空"})
+    if not name:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "新名称不能为空"})
+    try:
+        return await asyncio.to_thread(rename_scraper_entry, provider, entry_id, parent_id, name)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/move")
+async def move_scraper_entries_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    entry_ids = data.get("entry_ids", [])
+    target_cid = str(data.get("target_cid", "") or "").strip()
+    source_cid = str(data.get("source_cid", "") or "").strip()
+    if not isinstance(entry_ids, list) or not entry_ids:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "请选择要移动的条目"})
+    if not target_cid:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "目标目录不能为空"})
+    try:
+        return await asyncio.to_thread(move_scraper_entries, provider, entry_ids, target_cid, source_cid)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/delete")
+async def delete_scraper_entries_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    entry_ids = data.get("entry_ids", [])
+    parent_id = str(data.get("parent_id", "") or "").strip()
+    if not isinstance(entry_ids, list) or not entry_ids:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "请选择要删除的条目"})
+    try:
+        return await asyncio.to_thread(delete_scraper_entries, provider, entry_ids, parent_id)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/identify")
+async def identify_scraper_endpoint(request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    payload = data if isinstance(data, dict) else {}
+    try:
+        return await asyncio.to_thread(identify_scraper_media, payload)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/rename-plan")
+async def build_scraper_rename_plan_endpoint(request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    payload = data if isinstance(data, dict) else {}
+    try:
+        return await asyncio.to_thread(build_scraper_rename_plan, payload)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/jobs/create")
+async def create_scraper_job_endpoint(request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    payload = data if isinstance(data, dict) else {}
+    try:
+        result = await asyncio.to_thread(create_scraper_job_from_plan, payload)
+        job_id = int(result.get("job_id", 0) or 0)
+        submit_background(run_scraper_job, job_id, label="scraper-job")
+        return result
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.get("/scraper/jobs/state")
+async def get_scraper_jobs_state_endpoint(request: Request) -> Dict[str, Any]:
+    limit = max(1, min(parse_int(request.query_params.get("limit", 20), default=20), 100))
+    job_id = max(0, parse_int(request.query_params.get("job_id", 0), default=0))
+    try:
+        return await asyncio.to_thread(get_scraper_jobs_state, limit, job_id)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/jobs/{job_id}/rollback")
+async def rollback_scraper_job_endpoint(job_id: int) -> Dict[str, Any]:
+    normalized_job_id = max(0, int(job_id or 0))
+    if normalized_job_id <= 0:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "任务 ID 无效"})
+    try:
+        submit_background(rollback_scraper_job, normalized_job_id, label="scraper-rollback")
+        return {"ok": True, "job_id": normalized_job_id}
+    except Exception as exc:
+        return _error_response(exc)

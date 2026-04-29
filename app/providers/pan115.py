@@ -444,6 +444,140 @@ def create_115_folder(cookie: str, cid: str = "0", folder_name: str = "") -> Dic
         mark_cookie_health_failure("115", exc, trigger="runtime:create_115_folder")
         raise
 
+
+def _validate_115_entry_name(value: str) -> str:
+    normalized_name = str(value or "").strip()
+    if not normalized_name:
+        raise RuntimeError("文件名称不能为空")
+    if any(ch in normalized_name for ch in ("/", "\\")):
+        raise RuntimeError("文件名称不能包含 / 或 \\")
+    if normalized_name in (".", ".."):
+        raise RuntimeError("文件名称不合法")
+    if len(normalized_name) > 240:
+        raise RuntimeError("文件名称过长")
+    return normalized_name
+
+
+def rename_115_entry(cookie: str, entry_id: str, new_name: str, parent_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    normalized_id = str(entry_id or "").strip()
+    if not normalized_id:
+        raise RuntimeError("文件 ID 不能为空")
+    normalized_name = _validate_115_entry_name(new_name)
+    try:
+        headers = {
+            "Cookie": normalized_cookie,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://115.com/",
+            "Origin": "https://115.com",
+            "User-Agent": "Mozilla/5.0 115-media-hub",
+        }
+        response = http_request_form_json(
+            "https://webapi.115.com/files/batch_rename",
+            {f"files_new_name[{normalized_id}]": normalized_name},
+            timeout=45,
+            extra_headers=headers,
+        )
+        success = bool((response or {}).get("state")) or int((response or {}).get("errno", 0) or 0) == 0
+        if not success:
+            detail = (
+                str((response or {}).get("error", "")).strip()
+                or str((response or {}).get("msg", "")).strip()
+                or str((response or {}).get("message", "")).strip()
+                or "115 重命名失败"
+            )
+            raise RuntimeError(detail)
+        invalidate_115_entries_cache(parent_cid)
+        mark_cookie_health_success("115", trigger="runtime:rename_115_entry")
+        return {"id": normalized_id, "name": normalized_name, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("115", exc, trigger="runtime:rename_115_entry")
+        raise
+
+
+def move_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要移动的文件")
+    target_id = str(target_cid or "0").strip() or "0"
+    try:
+        headers = {
+            "Cookie": normalized_cookie,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://115.com/",
+            "Origin": "https://115.com",
+            "User-Agent": "Mozilla/5.0 115-media-hub",
+        }
+        payload = {"pid": target_id}
+        for index, entry_id in enumerate(ids):
+            payload[f"fid[{index}]"] = entry_id
+        response = http_request_form_json(
+            "https://webapi.115.com/files/move",
+            payload,
+            timeout=60,
+            extra_headers=headers,
+        )
+        success = bool((response or {}).get("state")) or int((response or {}).get("errno", 0) or 0) == 0
+        if not success:
+            detail = (
+                str((response or {}).get("error", "")).strip()
+                or str((response or {}).get("msg", "")).strip()
+                or str((response or {}).get("message", "")).strip()
+                or "115 移动失败"
+            )
+            raise RuntimeError(detail)
+        invalidate_115_entries_cache(source_cid)
+        invalidate_115_entries_cache(target_id)
+        mark_cookie_health_success("115", trigger="runtime:move_115_entries")
+        return {"ids": ids, "target_cid": target_id, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("115", exc, trigger="runtime:move_115_entries")
+        raise
+
+
+def delete_115_entries(cookie: str, entry_ids: List[str], parent_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要删除的文件")
+    try:
+        headers = {
+            "Cookie": normalized_cookie,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://115.com/",
+            "Origin": "https://115.com",
+            "User-Agent": "Mozilla/5.0 115-media-hub",
+        }
+        response = http_request_form_json(
+            "https://proapi.115.com/android/rb/delete",
+            {"file_ids": ",".join(ids)},
+            timeout=60,
+            extra_headers=headers,
+        )
+        success = bool((response or {}).get("state")) or bool((response or {}).get("success"))
+        if not success:
+            detail = (
+                str((response or {}).get("error", "")).strip()
+                or str((response or {}).get("msg", "")).strip()
+                or str((response or {}).get("message", "")).strip()
+                or "115 删除失败"
+            )
+            raise RuntimeError(detail)
+        invalidate_115_entries_cache(parent_cid)
+        mark_cookie_health_success("115", trigger="runtime:delete_115_entries")
+        return {"ids": ids, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("115", exc, trigger="runtime:delete_115_entries")
+        raise
+
+
 def sanitize_115_folder_name(value: str, fallback: str = "未命名") -> str:
     cleaned = re.sub(r"[\\/:*?\"<>|]+", " ", str(value or "")).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip()

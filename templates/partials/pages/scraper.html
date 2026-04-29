@@ -1,0 +1,144 @@
+        <div id="page-scraper" class="page-panel scraper-page hidden">
+            <div class="scraper-shell">
+                <section class="scraper-topbar" aria-label="刮削管理状态">
+                    <div class="scraper-title-block">
+                        <div class="scraper-eyebrow">Scraper</div>
+                        <h2 class="scraper-title">刮削管理</h2>
+                        <div id="scraper-provider-status" class="scraper-subtitle">正在读取网盘状态...</div>
+                    </div>
+                    <div id="scraper-provider-tabs" class="scraper-provider-tabs" role="group" aria-label="网盘选择"></div>
+                </section>
+
+                <section class="scraper-workgrid">
+                    <div class="scraper-panel scraper-browser-panel">
+                        <div class="scraper-panel-head">
+                            <div>
+                                <div class="scraper-panel-kicker">Files</div>
+                                <h3 class="scraper-panel-title">网盘文件</h3>
+                            </div>
+                            <div class="scraper-head-actions">
+                                <button id="scraper-refresh-btn" type="button" class="scraper-icon-btn" data-scraper-action="refresh" title="刷新当前目录" aria-label="刷新当前目录">
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path d="M20 12A8 8 0 1 1 17.66 6.34M20 5.5V12H13.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="scraper-breadcrumbs" class="scraper-breadcrumbs" aria-label="当前位置"></div>
+
+                        <div class="scraper-browser-tools">
+                            <div class="scraper-search-box">
+                                <input id="scraper-search-input" class="scraper-input" placeholder="筛选当前目录">
+                                <button type="button" class="scraper-compact-btn" data-scraper-action="search">筛选</button>
+                            </div>
+                            <div class="scraper-create-folder">
+                                <input id="scraper-new-folder-name" class="scraper-input" placeholder="新文件夹名称">
+                                <button type="button" class="scraper-compact-btn scraper-primary-soft" data-scraper-action="create-folder">新建</button>
+                            </div>
+                        </div>
+
+                        <div class="scraper-selection-bar">
+                            <div id="scraper-selection-count" class="scraper-selection-count">未选择条目</div>
+                            <div class="scraper-selection-actions">
+                                <button type="button" class="scraper-compact-btn" data-scraper-action="rename-selected">重命名</button>
+                                <button type="button" class="scraper-compact-btn" data-scraper-action="prepare-move">移动</button>
+                                <button type="button" class="scraper-compact-btn scraper-danger-soft" data-scraper-action="delete-selected">删除</button>
+                                <button type="button" class="scraper-compact-btn scraper-primary-soft" data-scraper-action="identify">识别</button>
+                            </div>
+                        </div>
+
+                        <div id="scraper-move-buffer" class="scraper-move-buffer hidden"></div>
+
+                        <div class="scraper-entry-table">
+                            <div class="scraper-entry-header">
+                                <div class="scraper-entry-name-cell">
+                                    <input id="scraper-check-all" type="checkbox" class="ui-checkbox ui-checkbox-sm" aria-label="选择当前目录全部条目">
+                                    <span>名称</span>
+                                </div>
+                                <span>大小</span>
+                                <span>时间</span>
+                            </div>
+                            <div id="scraper-entry-list" class="scraper-entry-list"></div>
+                        </div>
+                    </div>
+
+                    <aside class="scraper-panel scraper-inspector-panel">
+                        <div class="scraper-panel-head">
+                            <div>
+                                <div class="scraper-panel-kicker">TMDB</div>
+                                <h3 class="scraper-panel-title">识别与命名</h3>
+                            </div>
+                        </div>
+
+                        <div id="scraper-identify-summary" class="scraper-status-box">等待选择文件或文件夹。</div>
+                        <div id="scraper-candidate-list" class="scraper-candidate-list"></div>
+
+                        <div class="scraper-manual-search">
+                            <div class="scraper-field-label">手动搜索 TMDB</div>
+                            <div class="scraper-manual-row">
+                                <input id="scraper-manual-query" class="scraper-input" placeholder="影视名称">
+                                <select id="scraper-manual-media-type" class="scraper-select" aria-label="TMDB 类型">
+                                    <option value="movie">电影</option>
+                                    <option value="tv">电视剧</option>
+                                </select>
+                                <button type="button" class="scraper-compact-btn" data-scraper-action="manual-search">搜索</button>
+                            </div>
+                            <div id="scraper-manual-results" class="scraper-manual-results"></div>
+                        </div>
+
+                        <div class="scraper-options">
+                            <div class="scraper-field-label">命名选项</div>
+                            <div class="scraper-option-grid">
+                                <label class="scraper-option-field">
+                                    <span>标题语言</span>
+                                    <select id="scraper-title-language" class="scraper-select">
+                                        <option value="auto">跟随 TMDB 配置</option>
+                                        <option value="zh">中文名</option>
+                                        <option value="en">英文名</option>
+                                    </select>
+                                </label>
+                                <label class="scraper-option-field">
+                                    <span>默认季</span>
+                                    <input id="scraper-season" type="number" min="1" max="99" value="1" class="scraper-input">
+                                </label>
+                            </div>
+                            <div class="scraper-tag-grid" aria-label="保留扩展标签">
+                                <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="resolution" checked> 清晰度</label>
+                                <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="source" checked> 片源</label>
+                                <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="dynamic_range" checked> HDR/DV</label>
+                                <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="video"> 视频编码</label>
+                                <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="audio"> 音频规格</label>
+                            </div>
+                        </div>
+
+                        <div class="scraper-inspector-actions">
+                            <button id="scraper-build-plan-btn" type="button" class="scraper-main-btn" data-scraper-action="build-plan">生成预览</button>
+                        </div>
+                    </aside>
+                </section>
+
+                <section class="scraper-panel scraper-plan-panel">
+                    <div class="scraper-panel-head">
+                        <div>
+                            <div class="scraper-panel-kicker">Dry Run</div>
+                            <h3 class="scraper-panel-title">命名预览</h3>
+                        </div>
+                        <button id="scraper-execute-btn" type="button" class="scraper-main-btn scraper-main-btn-compact" data-scraper-action="execute-plan" disabled>确认执行</button>
+                    </div>
+                    <div id="scraper-plan-summary" class="scraper-status-box">生成预览后会显示旧路径、新路径、识别依据和冲突状态。</div>
+                    <div id="scraper-plan-list" class="scraper-plan-list"></div>
+                </section>
+
+                <section class="scraper-panel scraper-jobs-panel">
+                    <div class="scraper-panel-head">
+                        <div>
+                            <div class="scraper-panel-kicker">Jobs</div>
+                            <h3 class="scraper-panel-title">任务记录与回退</h3>
+                        </div>
+                        <button type="button" class="scraper-compact-btn" data-scraper-action="refresh-jobs">刷新记录</button>
+                    </div>
+                    <div id="scraper-job-list" class="scraper-job-list"></div>
+                </section>
+            </div>
+        </div>

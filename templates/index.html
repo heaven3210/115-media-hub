@@ -57,6 +57,16 @@
                     </span>
                     <span class="shell-nav-btn-label">影视订阅</span>
                 </button>
+                <button type="button" id="tab-scraper" data-tab-target="scraper" data-module-nav="scraper" class="shell-nav-btn" onclick="switchTab('scraper')">
+                    <span class="shell-nav-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path d="M5.5 5.5H18.5V18.5H5.5V5.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                            <path d="M8.5 9H15.5M8.5 12H13.5M8.5 15H11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                            <path d="M16 14.2L17.1 15.3L19 13.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="shell-nav-btn-label">刮削管理</span>
+                </button>
                 <button type="button" id="tab-monitor" data-tab-target="monitor" data-module-nav="monitor" class="shell-nav-btn" onclick="switchTab('monitor')">
                     <span class="shell-nav-btn-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none">
@@ -141,6 +151,7 @@
         </div>
         {% include "partials/pages/task.html" %}
         {% include "partials/pages/resource.html" %}
+        {% include "partials/pages/scraper.html" %}
         {% include "partials/pages/subscription.html" %}
         {% include "partials/pages/settings.html" %}
         {% include "partials/pages/monitor_about.html" %}
@@ -169,6 +180,15 @@
                         </svg>
                     </span>
                     <span class="shell-mobile-btn-label">订阅</span>
+                </button>
+                <button type="button" class="shell-mobile-btn" data-tab-target="scraper" data-module-nav="scraper" onclick="switchTab('scraper')">
+                    <span class="shell-mobile-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path d="M5.5 5.5H18.5V18.5H5.5V5.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                            <path d="M8.5 9H15.5M8.5 12H13.5M8.5 15H11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                        </svg>
+                    </span>
+                    <span class="shell-mobile-btn-label">刮削</span>
                 </button>
                 <button type="button" class="shell-mobile-btn" data-tab-target="monitor" data-module-nav="monitor" onclick="switchTab('monitor')">
                     <span class="shell-mobile-btn-icon" aria-hidden="true">

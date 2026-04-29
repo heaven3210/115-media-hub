@@ -187,6 +187,7 @@
         const moduleScrollTopState = {
             resource: 0,
             subscription: 0,
+            scraper: 0,
             monitor: 0,
             task: 0,
             settings: 0,
@@ -207,6 +208,7 @@
         const moduleVisitState = {
             resource: true,
             subscription: false,
+            scraper: false,
             monitor: false,
             task: false,
             settings: false,
@@ -215,6 +217,7 @@
         const SHELL_TAB_META = {
             resource: { title: '资源中心' },
             subscription: { title: '影视订阅' },
+            scraper: { title: '刮削管理' },
             monitor: { title: '文件夹监控' },
             task: { title: '目录树任务' },
             settings: { title: '参数配置' },
@@ -370,6 +373,10 @@
 
         async function loadSubscriptionTabModule() {
             return loadTabModule('subscription');
+        }
+
+        async function loadScraperTabModule() {
+            return loadTabModule('scraper');
         }
 
         async function loadResourceTabModule() {
@@ -614,6 +621,10 @@
             if (tab === 'subscription' && !moduleVisitState.subscription) {
                 await refreshSubscriptionState();
                 moduleVisitState.subscription = true;
+                return;
+            }
+            if (tab === 'scraper') {
+                moduleVisitState.scraper = true;
                 return;
             }
             if (tab === 'monitor' && !moduleVisitState.monitor) {
