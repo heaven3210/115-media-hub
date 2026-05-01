@@ -212,6 +212,9 @@ POST /webhook/{任务名}
 
 - `TZ`：容器时区，建议 `Asia/Shanghai`
 - `UVICORN_ACCESS_LOG`：是否启用 HTTP 访问日志，默认 `0`；排查接口访问时可设为 `1`
+- `UI_PUSH_DEBOUNCE_SECONDS`：状态流推送合并等待秒数，默认 `0.35`；NAS 这类低功耗机器可适当调大
+- `UI_STATUS_LOG_TAIL_LIMIT`：状态流里下发的日志尾部条数，默认 `160`；日志很多时可适当调小
+- `UI_STATUS_LOG_MEMORY_LIMIT`：内存里保留的状态日志条数，默认 `220`；只想保留更少历史时可调小
 - `STRM_PROXY_MODE`：STRM 播放模式默认值，默认 `redirect_direct`
 - `API_115_RATE_LIMIT_SECONDS`：115 API 最小间隔，默认 `0.35`；账号风控明显时可调大
 - `API_115_LIST_CACHE_TTL_SECONDS`：115 目录列表缓存秒数，默认 `60`

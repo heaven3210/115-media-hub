@@ -171,9 +171,15 @@
             const box = document.getElementById('subscription-log-box');
             if (!box) return;
             const logs = subscriptionState.logs || [];
-            const logSignature = buildLogSignature(logs, (item) => `${item?.level || 'info'}:${item?.text || ''}`);
+            const logSignature = buildLogSignature(logs, (item) => `${item?.signature || ''}:${item?.level || 'info'}:${item?.display_text || item?.text || ''}`);
             if (logSignature === lastSubscriptionLogSignature) return;
-            box.innerHTML = logs.map(item => `<div class="${getLogEntryClass(item)}">${formatMonitorLogHtml(item)}</div>`).join('');
+            box.innerHTML = logs.map(item => {
+                const displayItem = {
+                    ...item,
+                    text: String(item?.display_text || item?.text || ''),
+                };
+                return `<div class="${getLogEntryClass(displayItem)}">${formatMonitorLogHtml(displayItem)}</div>`;
+            }).join('');
             box.scrollTop = box.scrollHeight;
             lastSubscriptionLogSignature = logSignature;
         }

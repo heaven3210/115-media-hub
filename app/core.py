@@ -324,7 +324,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 UI_EVENT_RETRY_MS = 3000
 UI_HEARTBEAT_SECONDS = 15
-UI_PUSH_DEBOUNCE_SECONDS = 0.15
+UI_PUSH_DEBOUNCE_SECONDS = max(
+    0.05,
+    min(2.0, float(os.environ.get("UI_PUSH_DEBOUNCE_SECONDS", 0.35) or 0.35)),
+)
+UI_STATUS_LOG_TAIL_LIMIT = max(
+    40,
+    min(300, int(os.environ.get("UI_STATUS_LOG_TAIL_LIMIT", 160) or 160)),
+)
+UI_STATUS_LOG_MEMORY_LIMIT = max(
+    UI_STATUS_LOG_TAIL_LIMIT,
+    min(500, int(os.environ.get("UI_STATUS_LOG_MEMORY_LIMIT", 220) or 220)),
+)
 TG_SYNC_TTL_SECONDS = 5 * 60
 RESOURCE_CHANNEL_CACHE_LIMIT = max(1, int(os.environ.get("RESOURCE_CHANNEL_CACHE_LIMIT", 10) or 10))
 RESOURCE_CHANNEL_CACHE_GLOBAL_LIMIT = max(
@@ -2980,24 +2991,35 @@ def match_monitor_task_for_savepath(cfg: Dict[str, Any], savepath: str, provider
 
 
 def restore_runtime_logs_from_files() -> None:
-    main_lines = read_log_tail(MAIN_LOG_PATH, limit=500)
+    main_lines = read_log_tail(MAIN_LOG_PATH, limit=UI_STATUS_LOG_MEMORY_LIMIT)
     if main_lines:
         task_status["logs"] = [
             {"text": line, "level": infer_log_level_from_text(line)}
             for line in main_lines
         ]
 
-    monitor_lines = read_log_tail(MONITOR_LOG_PATH, limit=800)
+    monitor_lines = read_log_tail(MONITOR_LOG_PATH, limit=UI_STATUS_LOG_MEMORY_LIMIT)
     if monitor_lines:
         monitor_status["logs"] = [
             {"text": line, "level": infer_log_level_from_text(line)}
             for line in monitor_lines
         ]
 
-    subscription_lines = read_log_tail(SUBSCRIPTION_LOG_PATH, limit=800)
+    subscription_lines = read_log_tail(SUBSCRIPTION_LOG_PATH, limit=UI_STATUS_LOG_MEMORY_LIMIT)
     if subscription_lines:
         subscription_status["logs"] = [
-            {"text": line, "level": infer_log_level_from_text(line)}
+            {
+                "text": _build_subscription_log_display_text(
+                    re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", line, count=1).strip(),
+                    {},
+                ),
+                "display_text": _build_subscription_log_display_text(
+                    re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", line, count=1).strip(),
+                    {},
+                ),
+                "level": infer_log_level_from_text(line),
+                "signature": hashlib.sha1(line.encode("utf-8")).hexdigest()[:12],
+            }
             for line in subscription_lines
         ]
 
@@ -3627,22 +3649,44 @@ def clone_jsonable(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False))
 
 
-def build_main_status_payload() -> Dict[str, Any]:
+def _append_status_log_entry(logs: List[Dict[str, Any]], entry: Dict[str, Any], limit: int = UI_STATUS_LOG_MEMORY_LIMIT) -> None:
+    logs.append(entry)
+    overflow = len(logs) - max(1, int(limit or 0))
+    if overflow > 0:
+        del logs[:overflow]
+
+
+def _tail_jsonable_logs(logs: Any, limit: int = UI_STATUS_LOG_TAIL_LIMIT) -> List[Dict[str, Any]]:
+    if not isinstance(logs, list):
+        return []
+    tail = logs[-max(0, int(limit or 0)) :] if limit else logs
+    return clone_jsonable(tail)
+
+
+def build_main_status_payload(log_limit: int = UI_STATUS_LOG_TAIL_LIMIT) -> Dict[str, Any]:
     return {
         "running": bool(task_status["running"]),
         "next_run": task_status.get("next_run"),
-        "logs": clone_jsonable(task_status.get("logs", [])),
+        "logs": _tail_jsonable_logs(task_status.get("logs", []), log_limit),
+        "log_total": len(task_status.get("logs", [])) if isinstance(task_status.get("logs", []), list) else 0,
+        "log_tail_limit": max(0, int(log_limit or 0)),
         "progress": clone_jsonable(task_status.get("progress", {})),
     }
 
 
-def build_monitor_status_payload(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_monitor_status_payload(
+    cfg: Optional[Dict[str, Any]] = None,
+    log_limit: int = UI_STATUS_LOG_TAIL_LIMIT,
+) -> Dict[str, Any]:
     cfg = cfg or get_config()
+    logs = monitor_status.get("logs", [])
     return {
         "running": bool(monitor_status["running"]),
         "current_task": str(monitor_status.get("current_task", "")),
         "queued": clone_jsonable(monitor_status.get("queued", [])),
-        "logs": clone_jsonable(monitor_status.get("logs", [])),
+        "logs": _tail_jsonable_logs(logs, log_limit),
+        "log_total": len(logs) if isinstance(logs, list) else 0,
+        "log_tail_limit": max(0, int(log_limit or 0)),
         "summary": clone_jsonable(monitor_status.get("summary", {})),
         "tasks": clone_jsonable(cfg.get("monitor_tasks", [])),
         "webhook_base": "/webhook/",
@@ -3650,13 +3694,19 @@ def build_monitor_status_payload(cfg: Optional[Dict[str, Any]] = None) -> Dict[s
     }
 
 
-def build_subscription_status_payload(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_subscription_status_payload(
+    cfg: Optional[Dict[str, Any]] = None,
+    log_limit: int = UI_STATUS_LOG_TAIL_LIMIT,
+) -> Dict[str, Any]:
     cfg = cfg or get_config()
+    logs = subscription_status.get("logs", [])
     return {
         "running": bool(subscription_status["running"]),
         "current_task": str(subscription_status.get("current_task", "")),
         "queued": clone_jsonable(subscription_status.get("queued", [])),
-        "logs": clone_jsonable(subscription_status.get("logs", [])),
+        "logs": _tail_jsonable_logs(logs, log_limit),
+        "log_total": len(logs) if isinstance(logs, list) else 0,
+        "log_tail_limit": max(0, int(log_limit or 0)),
         "summary": clone_jsonable(subscription_status.get("summary", {})),
         "tasks": clone_jsonable(list_subscription_task_runtime(cfg)),
         "next_runs": clone_jsonable(subscription_next_run),
@@ -4237,9 +4287,7 @@ async def update_progress(step: str, percent: float, detail: str) -> None:
 async def write_log(msg: str, level: Optional[str] = None) -> None:
     resolved_level = str(level or infer_log_level_from_text(msg)).strip().lower() or "info"
     line = f"{format_log_time(True)} {msg}"
-    task_status["logs"].append({"text": line, "level": resolved_level})
-    if len(task_status["logs"]) > 500:
-        task_status["logs"].pop(0)
+    _append_status_log_entry(task_status["logs"], {"text": line, "level": resolved_level})
     schedule_ui_state_push()
     await asyncio.to_thread(append_log_file, MAIN_LOG_PATH, line)
     await asyncio.sleep(0)
@@ -4248,9 +4296,7 @@ async def write_log(msg: str, level: Optional[str] = None) -> None:
 async def write_monitor_log(text: str, level: str = "info") -> None:
     resolved_level = str(level or infer_log_level_from_text(text)).strip().lower() or "info"
     line = f"{format_log_time(True)} {text}"
-    monitor_status["logs"].append({"text": line, "level": resolved_level})
-    if len(monitor_status["logs"]) > 800:
-        monitor_status["logs"].pop(0)
+    _append_status_log_entry(monitor_status["logs"], {"text": line, "level": resolved_level})
     schedule_ui_state_push()
     await asyncio.to_thread(append_log_file, MONITOR_LOG_PATH, line)
     await asyncio.sleep(0)
@@ -4335,6 +4381,61 @@ def _infer_subscription_log_reason_code(text: str) -> str:
     return ""
 
 
+def _build_subscription_log_display_text(text: str, event_payload: Dict[str, Any]) -> str:
+    raw_text = str(text or "").strip()
+    payload = event_payload if isinstance(event_payload, dict) else {}
+    event = str(payload.get("event", "") or "").strip()
+    stage = str(payload.get("stage", "") or "").strip()
+    task_name = str(payload.get("task_name", "") or "").strip()
+    provider = str(payload.get("provider", "") or "").strip()
+    media_type = str(payload.get("media_type", "") or "").strip()
+    reason_code = str(payload.get("reason_code", "") or "").strip()
+
+    provider_text = {"115": "115", "quark": "Quark"}.get(provider, provider)
+    media_text = {"tv": "剧", "movie": "影"}.get(media_type, "")
+    task_part = f" | {task_name}" if task_name else ""
+    provider_part = f" | {provider_text}" if provider_text else ""
+    media_part = f" | {media_text}" if media_text else ""
+
+    event_text_map = {
+        "subscription.run.start": "订阅开始",
+        "subscription.run.finish": "订阅结束",
+        "subscription.search.summary": "搜索完成",
+        "subscription.search.incremental": "增量搜索",
+        "subscription.import.success": "导入成功",
+        "subscription.import.failed": "导入失败",
+        "subscription.import.timeout": "导入超时",
+        "subscription.batch.refresh.summary": "批次收口",
+        "subscription.run.failed": "订阅失败",
+    }
+    if event in event_text_map:
+        extra = ""
+        if reason_code:
+            extra = f" | {reason_code}"
+        return f"{event_text_map[event]}{task_part}{provider_part}{media_part}{extra}".strip()
+
+    stage_text_map = {
+        "search": "搜索",
+        "candidate": "候选",
+        "import": "导入",
+        "batch_refresh": "收口",
+        "lifecycle": "流程",
+        "runtime": "运行",
+    }
+    stage_label = stage_text_map.get(stage, stage or "运行")
+    shortened = raw_text
+    for prefix in ("订阅开始：", "订阅结束：", "搜索完成：", "导入成功：", "导入失败：", "批次收口汇总：", "失败原因: ", "失败原因："):
+        if shortened.startswith(prefix):
+            shortened = shortened[len(prefix):].strip()
+            break
+    shortened = re.sub(r"\s+", " ", shortened).strip()
+    if len(shortened) > 42:
+        shortened = f"{shortened[:18]}…{shortened[-18:]}"
+    if not shortened:
+        shortened = "更新"
+    return f"{stage_label} | {shortened}{task_part}".strip()
+
+
 async def write_subscription_log(text: str, level: str = "info") -> None:
     resolved_level = str(level or infer_log_level_from_text(text)).strip().lower() or "info"
     timestamp = format_log_time(True)
@@ -4356,9 +4457,20 @@ async def write_subscription_log(text: str, level: str = "info") -> None:
         "media_type": str(context.get("media_type", "") or "").strip(),
         "trigger": str(context.get("trigger", "") or "").strip(),
     }
-    subscription_status["logs"].append({"text": line, "level": resolved_level, "event": event_payload})
-    if len(subscription_status["logs"]) > 800:
-        subscription_status["logs"].pop(0)
+    display_text = _build_subscription_log_display_text(text, event_payload)
+    ui_event_payload = {
+        key: value
+        for key, value in event_payload.items()
+        if key != "text"
+    }
+    ui_log_entry = {
+        "text": display_text,
+        "display_text": display_text,
+        "level": resolved_level,
+        "event": ui_event_payload,
+        "signature": hashlib.sha1(line.encode("utf-8")).hexdigest()[:12],
+    }
+    _append_status_log_entry(subscription_status["logs"], ui_log_entry)
     schedule_ui_state_push()
     try:
         await asyncio.to_thread(append_log_file, SUBSCRIPTION_LOG_PATH, line)
@@ -4366,9 +4478,14 @@ async def write_subscription_log(text: str, level: str = "info") -> None:
     except Exception as exc:
         # 日志写盘失败不应中断主流程，保留内存日志并继续执行任务。
         fallback_line = f"{format_log_time(True)} [WARN] 订阅日志写盘失败：{str(exc)[:180]}"
-        subscription_status["logs"].append({"text": fallback_line, "level": "warn"})
-        if len(subscription_status["logs"]) > 800:
-            subscription_status["logs"].pop(0)
+        _append_status_log_entry(
+            subscription_status["logs"],
+            {
+                "text": "日志写盘失败",
+                "level": "warn",
+                "signature": hashlib.sha1(fallback_line.encode("utf-8")).hexdigest()[:12],
+            },
+        )
         schedule_ui_state_push()
     await asyncio.sleep(0)
 
