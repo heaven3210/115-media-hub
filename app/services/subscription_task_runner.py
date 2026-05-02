@@ -175,6 +175,8 @@ async def _prewarm_subscription_candidate_share_manifests(
             f"高优先上限 {high_max_entries or '不限制'} 条"
         ),
         "info",
+        compact=f"候选精查 | {len(rows)} 个分享清单 · 并发 {concurrency}"
+                + (f" · 上限 {normal_max_entries}" if normal_max_entries > 0 else ""),
     )
 
     semaphore = asyncio.Semaphore(concurrency)
@@ -460,6 +462,9 @@ async def _write_subscription_search_diagnostics(search_stats: Dict[str, Any], l
                 f"单频道 {channel_timeout or '--'} 秒"
             ),
             "info",
+            compact=f"搜索参数 | {keyword_limit or '--'} 关键词 · 并发 {keyword_concurrency or '--'} · "
+                    f"每频道 {per_channel_limit or '--'} 条" + (
+                    f" · 总上限 {total_limit_label}" if total_limit > 0 else ""),
         )
     cached_items = int(payload.get("channel_cached_items", payload.get("cached_items", 0)) or 0)
     cache_queries = int(payload.get("channel_cache_queries", payload.get("cache_queries", 0)) or 0)
@@ -467,27 +472,35 @@ async def _write_subscription_search_diagnostics(search_stats: Dict[str, Any], l
     channel_returned_items = int(payload.get("channel_returned_items", 0) or 0)
     channel_candidate_count = int(payload.get("channel_candidate_count", 0) or 0)
     channel_scored_items = int(payload.get("channel_scored_items", 0) or 0)
-    if keyword_limit > 0 or channel_returned_items > 0 or channel_scored_items > 0 or channel_candidate_count > 0:
-        await write_subscription_log(
-            f"{label}频道召回：返回 {channel_returned_items} 条，评分 {channel_scored_items} 条，入选候选 {channel_candidate_count} 条",
-            "info",
-        )
-    if cached_items > 0:
-        await write_subscription_log(
-            f"{label}本地缓存召回：命中 {cached_items} 条历史频道资源（查询 {cache_queries or '--'} 组关键词）",
-            "info",
-        )
-    if cache_errors > 0:
-        await write_subscription_log(
-            f"{label}本地缓存召回有 {cache_errors} 次查询异常，已忽略并继续执行",
-            "warn",
-        )
     pansou_items = int(payload.get("pansou_items", 0) or 0)
     pansou_returned_items = int(payload.get("pansou_returned_items", pansou_items) or 0)
     pansou_candidate_count = int(payload.get("pansou_candidate_count", 0) or 0)
     pansou_scored_items = int(payload.get("pansou_scored_items", 0) or 0)
     pansou_errors = int(payload.get("pansou_errors", 0) or 0)
+    # 召回统计：文件日志保留详情，前端 SSE 合并为一条汇总
+    recall_msg = f"{label}频道召回：返回 {channel_returned_items} 条，评分 {channel_scored_items} 条，入选候选 {channel_candidate_count} 条"
+    if cached_items > 0:
+        recall_msg += f"；缓存命中 {cached_items} 条（查询 {cache_queries or '--'} 组关键词）"
     if bool(payload.get("pansou_enabled", False)):
+        recall_msg += f"；盘搜返回 {pansou_returned_items} 条，评分 {pansou_scored_items} 条，入选候选 {pansou_candidate_count} 条"
+    compact_parts = [f"频道 {channel_candidate_count} 候选"]
+    if cached_items > 0:
+        compact_parts.append(f"缓存 {cached_items}")
+    if bool(payload.get("pansou_enabled", False)):
+        compact_parts.append(f"盘搜 {pansou_candidate_count} 候选")
+    if channel_returned_items > 0 or cached_items > 0 or pansou_returned_items > 0:
+        total_raw = channel_returned_items + cached_items + pansou_returned_items
+        compact_parts.insert(0, f"原始 {total_raw}")
+    await write_subscription_log(
+        recall_msg, "info",
+        compact=f"召回汇总 | {' · '.join(compact_parts)}",
+    )
+    if cache_errors > 0:
+        await write_subscription_log(
+            f"{label}本地缓存召回有 {cache_errors} 次查询异常，已忽略并继续执行",
+            "warn",
+        )
+    if bool(payload.get("pansou_enabled", False)) and pansou_errors > 0:
         pansou_total_limit = int(payload.get("pansou_total_limit", 0) or 0)
         elapsed = max(0.0, float(payload.get("pansou_elapsed_seconds", 0.0) or 0.0))
         await write_subscription_log(
@@ -496,7 +509,7 @@ async def _write_subscription_search_diagnostics(search_stats: Dict[str, Any], l
                 f"入选候选 {pansou_candidate_count} 条，上限 {pansou_total_limit or '不截断'} 条，"
                 f"异常 {pansou_errors} 次，用时 {elapsed:.1f} 秒"
             ),
-            "info" if pansou_errors <= 0 else "warn",
+            "warn",
         )
     slow_channels = payload.get("slow_channels", [])
     if not isinstance(slow_channels, list) or not slow_channels:
@@ -529,6 +542,7 @@ async def _write_subscription_task_overview(
     elif not batch_refresh_enabled:
         batch_refresh_label = "关闭"
 
+    exclude_keywords = normalize_subscription_exclude_keywords(task.get("exclude_keywords", []))
     await write_subscription_section("任务信息")
     await write_subscription_log(
         (
@@ -536,18 +550,18 @@ async def _write_subscription_task_overview(
             f"类型: {media_label} | 网盘: {provider_label} | 触发: {format_subscription_trigger(trigger)}"
         ),
         "info",
+        compact=f"订阅: {str(task.get('title', '') or task.get('name', '') or '--').strip()} | "
+                f"{media_label} | {provider_label} | {format_subscription_trigger(trigger)}",
     )
     await write_subscription_log(
-        f"保存路径: {str(task.get('savepath', '') or '--').strip()} | 执行批次: {subscription_run_id}",
+        f"保存路径: {str(task.get('savepath', '') or '--').strip()} | 执行批次: {subscription_run_id} | "
+        f"批次收口刷新: {batch_refresh_label}"
+        + (f" | 排除词: {', '.join(exclude_keywords[:5])}" if exclude_keywords else ""),
         "info",
+        compact=f"保存路径: {str(task.get('savepath', '') or '--').strip()} | "
+                f"批次收口: {batch_refresh_label}"
+                + (f" | 排除词: {len(exclude_keywords)}个" if exclude_keywords else ""),
     )
-    await write_subscription_log(f"批次收口刷新: {batch_refresh_label}", "info")
-    exclude_keywords = normalize_subscription_exclude_keywords(task.get("exclude_keywords", []))
-    if exclude_keywords:
-        await write_subscription_log(
-            f"自定义排除词: {', '.join(exclude_keywords[:10])}",
-            "info",
-        )
 
     if int(task.get("tmdb_id", 0) or 0) > 0:
         tmdb_label = str(task.get("tmdb_title", "") or task.get("title", "") or "--").strip()

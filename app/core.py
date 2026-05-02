@@ -4504,6 +4504,23 @@ def _build_subscription_log_display_text(text: str, event_payload: Dict[str, Any
             extra = f" | {reason_code}"
         return f"{event_text_map[event]}{task_part}{provider_part}{media_part}{extra}".strip()
 
+    # 对于非事件型日志，提取关键数据：剧集号、数量、状态
+    episode_match = re.search(r"(E\d+(?:[-–,，、]\d+)*(?:[,-]?E\d+(?:[-–]\d+)?)*)", raw_text)
+    episode_preview = f" {episode_match.group(1)}" if episode_match else ""
+
+    # 提取文件数/候选数
+    count_match = re.search(r"(\d+)\s*(?:个文件|条|候选|集)", raw_text)
+    count_text = f" {count_match.group(0)}" if count_match else ""
+
+    # 提取成功/失败/跳过/未命中 等关键状态
+    status_hint = ""
+    if "成功" in raw_text or "→ 成功" in raw_text:
+        status_hint = " → 成功"
+    elif "失败" in raw_text or "→ 失败" in raw_text or "未命中" in raw_text:
+        status_hint = " → 失败"
+    elif "跳过" in raw_text:
+        status_hint = " → 跳过"
+
     stage_text_map = {
         "search": "搜索",
         "candidate": "候选",
@@ -4519,14 +4536,20 @@ def _build_subscription_log_display_text(text: str, event_payload: Dict[str, Any
             shortened = shortened[len(prefix):].strip()
             break
     shortened = re.sub(r"\s+", " ", shortened).strip()
-    if len(shortened) > 42:
-        shortened = f"{shortened[:18]}…{shortened[-18:]}"
+
+    # 有剧集号时优先展示剧集 + 结果
+    if episode_preview:
+        result = f"{stage_label}{episode_preview}{count_text}{status_hint}{task_part}".strip()
+        return result[:80]
+
+    if len(shortened) > 56:
+        shortened = f"{shortened[:26]}…{shortened[-24:]}"
     if not shortened:
         shortened = "更新"
     return f"{stage_label} | {shortened}{task_part}".strip()
 
 
-async def write_subscription_log(text: str, level: str = "info") -> None:
+async def write_subscription_log(text: str, level: str = "info", compact: Optional[str] = None) -> None:
     resolved_level = str(level or infer_log_level_from_text(text)).strip().lower() or "info"
     timestamp = format_log_time(True)
     line = f"{timestamp} {text}"
@@ -4547,7 +4570,7 @@ async def write_subscription_log(text: str, level: str = "info") -> None:
         "media_type": str(context.get("media_type", "") or "").strip(),
         "trigger": str(context.get("trigger", "") or "").strip(),
     }
-    display_text = _build_subscription_log_display_text(text, event_payload)
+    display_text = str(compact or "").strip() or _build_subscription_log_display_text(text, event_payload)
     ui_event_payload = {
         key: value
         for key, value in event_payload.items()
