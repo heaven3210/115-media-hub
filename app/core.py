@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config_store import JsonConfigStore
 from .db import (
@@ -228,6 +229,20 @@ app.add_middleware(
     GZipMiddleware,
     minimum_size=1024,
 )
+
+
+class _StaticCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.url.path.lower()
+        if path.startswith("/static/") and any(
+            path.endswith(ext) for ext in (".js", ".css", ".svg", ".ico", ".png", ".woff2")
+        ):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+app.add_middleware(_StaticCacheMiddleware)
 HTTP_TIMING_HEADER_ENABLED = str(os.environ.get("HTTP_TIMING_HEADER_ENABLED", "0") or "0").strip().lower() not in {
     "0",
     "false",
