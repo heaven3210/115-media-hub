@@ -3180,6 +3180,10 @@ cookie_health_runtime: Dict[str, Dict[str, float]] = {
 }
 tmdb_cache_entries: Dict[str, Dict[str, Any]] = {}
 ui_event_subscribers: Set[asyncio.Queue[str]] = set()
+# SSE incremental broadcast state
+_last_broadcast_hashes: Dict[str, str] = {}
+_last_full_broadcast_ts: float = 0.0
+UI_FULL_BROADCAST_INTERVAL_SECONDS = 30.0
 ui_event_loop: Optional[asyncio.AbstractEventLoop] = None
 ui_push_pending = False
 ui_push_task: Optional[asyncio.Task] = None
@@ -3773,9 +3777,10 @@ def build_sign115_status_payload(cfg: Optional[Dict[str, Any]] = None) -> Dict[s
 def build_ui_state_payload(
     cfg: Optional[Dict[str, Any]] = None,
     log_limit: int = UI_STATUS_STREAM_LOG_TAIL_LIMIT,
+    incremental: bool = False,
 ) -> Dict[str, Any]:
     active_cfg = cfg or get_config()
-    return {
+    full = {
         "main": build_main_status_payload(log_limit=log_limit),
         "monitor": build_monitor_status_payload(active_cfg, log_limit=log_limit),
         "subscription": build_subscription_status_payload(active_cfg, log_limit=log_limit),
@@ -3783,6 +3788,22 @@ def build_ui_state_payload(
         "cookie_health": build_cookie_health_payload(active_cfg),
         "resource_channel_sync": build_resource_channel_sync_payload(),
     }
+    if not incremental:
+        return full
+
+    changed = []
+    delta: Dict[str, Any] = {}
+    for key, value in full.items():
+        module_hash = hashlib.md5(
+            json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if module_hash != _last_broadcast_hashes.get(key, ""):
+            changed.append(key)
+            delta[key] = value
+            _last_broadcast_hashes[key] = module_hash
+
+    delta["_changed"] = changed
+    return delta
 
 
 def set_resource_channel_sync_status(**fields: Any) -> None:
@@ -4223,13 +4244,21 @@ async def broadcast_ui_state(payload: str) -> None:
 
 
 async def flush_ui_state_updates(delay: float) -> None:
-    global ui_push_pending, ui_push_task
+    global ui_push_pending, ui_push_task, _last_full_broadcast_ts
     try:
         await asyncio.sleep(max(0.0, delay))
         while ui_push_pending:
             ui_push_pending = False
+            now_ts = time.time()
+            force_full = (now_ts - _last_full_broadcast_ts) >= UI_FULL_BROADCAST_INTERVAL_SECONDS
             cfg = get_config()
-            payload = json.dumps(build_ui_state_payload(cfg), ensure_ascii=False)
+            payload_dict = build_ui_state_payload(
+                cfg,
+                incremental=not force_full,
+            )
+            if force_full:
+                _last_full_broadcast_ts = now_ts
+            payload = json.dumps(payload_dict, ensure_ascii=False)
             await broadcast_ui_state(payload)
             if ui_push_pending:
                 await asyncio.sleep(UI_PUSH_DEBOUNCE_SECONDS)
