@@ -32,5 +32,6 @@ preview-runtime/
 
 # local agent handoff context (not for repo)
 AGENTS.md
+CLAUDE.md
 doc/
 
