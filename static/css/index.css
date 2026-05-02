@@ -84,7 +84,7 @@
         #log-box::-webkit-scrollbar-thumb, #monitor-log-box::-webkit-scrollbar-thumb, #subscription-log-box::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
         #log-box { height: min(48vh, 420px) !important; }
         #monitor-log-box { height: min(46vh, 390px) !important; }
-        #subscription-log-box { height: min(42vh, 340px) !important; }
+        #subscription-log-box { height: min(42vh, 340px) !important; overflow-anchor: none; }
         #log-box, #monitor-log-box, #subscription-log-box { color: #cbd5e1; }
         .btn-disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; filter: grayscale(1); }
         .group-card { background: linear-gradient(180deg, rgba(30,41,59,0.96), rgba(15,23,42,0.96)); border: 1px solid #334155; border-radius: 1.5rem; padding: 1.5rem; box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35); }

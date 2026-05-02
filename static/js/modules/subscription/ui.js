@@ -8,6 +8,19 @@
             });
         }
 
+        const SUBSCRIPTION_LOG_RECENT_TASK_LIMIT = 5;
+        const SUBSCRIPTION_LOG_PAGE_TASK_LIMIT = 5;
+        let subscriptionLogRows = [];
+        let subscriptionLogOldestSeq = 0;
+        let subscriptionLogNewestSeq = 0;
+        let subscriptionLogHasMoreBefore = false;
+        let subscriptionLogLoading = false;
+        let subscriptionLogFollowTail = true;
+        let subscriptionLogRefreshTimer = null;
+        let subscriptionLogPendingLatestSeq = 0;
+        let subscriptionLogHydrated = false;
+        let subscriptionLogLastPullAt = 0;
+
         function getSubscriptionStatusLabel(status) {
             const normalized = String(status || 'idle').trim().toLowerCase();
             const map = {
@@ -56,6 +69,8 @@
                     },
                     renderSubscriptionTasks,
                     renderSubscriptionLogs,
+                    applySubscriptionLogs,
+                    applySubscriptionLogMeta,
                 });
                 return;
             }
@@ -64,7 +79,7 @@
                 ...subscriptionState,
                 ...data,
                 tasks: Array.isArray(data.tasks) ? data.tasks : (subscriptionState.tasks || []),
-                logs: Array.isArray(data.logs) ? data.logs : (subscriptionState.logs || []),
+                logs: Array.isArray(data.logs) ? data.logs : [],
                 queued: Array.isArray(data.queued) ? data.queued : (subscriptionState.queued || []),
                 next_runs: data.next_runs || subscriptionState.next_runs || {},
                 summary: data.summary || subscriptionState.summary || { step: '空闲', detail: '等待订阅任务' }
@@ -81,7 +96,8 @@
                 renderSubscriptionTasks();
                 lastSubscriptionRenderKey = renderKey;
             }
-            renderSubscriptionLogs();
+            if (Array.isArray(data.logs)) applySubscriptionLogs(data.logs);
+            applySubscriptionLogMeta(data.log_meta || { latest_seq: data.log_total || 0 });
         }
 
         function buildSubscriptionTaskIntro(task, {
@@ -140,7 +156,9 @@
                 : (provider === '115' && shareSubdirCid ? `，分享子目录 CID ${shareSubdirCid}` : '');
             const providerRuleText = provider === 'quark' ? '，仅频道自动匹配（不使用固定分享链接）' : '';
             const excludeText = excludeKeywords.length ? `，排除 ${excludeKeywords.slice(0, 4).join('、')}` : '';
-            return `状态：${statusText}（${enabledText}）。${providerText} · ${mediaText}《${titleText}》保存到 ${savepath}${fixedShareText}${shareScopeText}${providerRuleText}${excludeText}，${modeText}，${episodeText}；${scheduleText}；${latestText}。`;
+            const minFileSizeMb = normalizeSubscriptionMinFileSizeMb(task?.min_file_size_mb ?? 0);
+            const sizeFilterText = minFileSizeMb > 0 ? `，小于 ${formatSubscriptionMinFileSizeMb(minFileSizeMb)}MB 不导入` : '';
+            return `状态：${statusText}（${enabledText}）。${providerText} · ${mediaText}《${titleText}》保存到 ${savepath}${fixedShareText}${shareScopeText}${providerRuleText}${excludeText}${sizeFilterText}，${modeText}，${episodeText}；${scheduleText}；${latestText}。`;
         }
 
         function buildSubscriptionTaskProgressBar({ progress = 0, detail = '' } = {}) {
@@ -171,17 +189,285 @@
             const box = document.getElementById('subscription-log-box');
             if (!box) return;
             const logs = subscriptionState.logs || [];
-            const logSignature = buildLogSignature(logs, (item) => `${item?.signature || ''}:${item?.level || 'info'}:${item?.display_text || item?.text || ''}`);
+            const logSignature = buildLogSignature(logs, (item) => `${item?.signature || ''}:${item?.level || 'info'}:${item?.text || ''}`);
             if (logSignature === lastSubscriptionLogSignature) return;
             box.innerHTML = logs.map(item => {
                 const displayItem = {
                     ...item,
-                    text: String(item?.display_text || item?.text || ''),
+                    text: String(item?.text || item?.display_text || ''),
                 };
                 return `<div class="${getLogEntryClass(displayItem)}">${formatMonitorLogHtml(displayItem)}</div>`;
             }).join('');
             box.scrollTop = box.scrollHeight;
             lastSubscriptionLogSignature = logSignature;
+        }
+
+        function normalizeSubscriptionLogRow(item) {
+            const row = item && typeof item === 'object' ? item : {};
+            return {
+                ...row,
+                seq: Number(row.seq || 0),
+                text: String(row.text || row.display_text || ''),
+                display_text: String(row.display_text || row.text || ''),
+                raw_text: String(row.raw_text || ''),
+                level: String(row.level || 'info'),
+                signature: String(row.signature || '')
+            };
+        }
+
+        function syncSubscriptionLogBounds() {
+            subscriptionLogOldestSeq = subscriptionLogRows.length ? subscriptionLogRows[0].seq : 0;
+            subscriptionLogNewestSeq = subscriptionLogRows.length ? subscriptionLogRows[subscriptionLogRows.length - 1].seq : 0;
+        }
+
+        function getSubscriptionLogBoundaryText(row) {
+            return String(row?.raw_text || row?.display_text || row?.text || '').trim();
+        }
+
+        function isSubscriptionTaskLogStart(row) {
+            return getSubscriptionLogBoundaryText(row).includes('订阅开始');
+        }
+
+        function isSubscriptionTaskLogEnd(row) {
+            return getSubscriptionLogBoundaryText(row).includes('订阅结束');
+        }
+
+        function buildSubscriptionLogBlocks(rows) {
+            const blocks = [];
+            let activeTaskBlock = null;
+            const appendEntryToBlock = (block, entry) => {
+                block.entries.push(entry);
+                if (!block.startSeq || entry.seq < block.startSeq) block.startSeq = entry.seq;
+                if (!block.endSeq || entry.seq > block.endSeq) block.endSeq = entry.seq;
+            };
+            (Array.isArray(rows) ? rows : []).forEach((entry) => {
+                if (!entry || entry.seq <= 0) return;
+                if (isSubscriptionTaskLogStart(entry)) {
+                    activeTaskBlock = { task: true, startSeq: 0, endSeq: 0, entries: [] };
+                    blocks.push(activeTaskBlock);
+                    appendEntryToBlock(activeTaskBlock, entry);
+                    if (isSubscriptionTaskLogEnd(entry)) activeTaskBlock = null;
+                    return;
+                }
+                if (activeTaskBlock) {
+                    appendEntryToBlock(activeTaskBlock, entry);
+                    if (isSubscriptionTaskLogEnd(entry)) activeTaskBlock = null;
+                    return;
+                }
+                if (!blocks.length || blocks[blocks.length - 1].task) {
+                    blocks.push({ task: false, startSeq: 0, endSeq: 0, entries: [] });
+                }
+                appendEntryToBlock(blocks[blocks.length - 1], entry);
+            });
+            return blocks.filter(block => Array.isArray(block.entries) && block.entries.length);
+        }
+
+        function flattenSubscriptionLogBlocks(blocks) {
+            return (Array.isArray(blocks) ? blocks : [])
+                .flatMap(block => Array.isArray(block?.entries) ? block.entries : []);
+        }
+
+        function tailSubscriptionLogBlocksByTaskCount(blocks, limit = SUBSCRIPTION_LOG_RECENT_TASK_LIMIT) {
+            const list = Array.isArray(blocks) ? blocks : [];
+            const normalizedLimit = Math.max(1, Number(limit || SUBSCRIPTION_LOG_RECENT_TASK_LIMIT) || SUBSCRIPTION_LOG_RECENT_TASK_LIMIT);
+            if (!list.length) return [];
+            const taskCount = list.filter(block => !!block.task).length;
+            if (taskCount <= 0) return list.slice(-normalizedLimit);
+            let remaining = normalizedLimit;
+            let startIndex = 0;
+            for (let index = list.length - 1; index >= 0; index -= 1) {
+                if (list[index].task) remaining -= 1;
+                if (remaining <= 0) {
+                    startIndex = index;
+                    break;
+                }
+            }
+            return list.slice(startIndex);
+        }
+
+        function mergeSubscriptionLogRows(rows, { prepend = false } = {}) {
+            const incoming = Array.isArray(rows) ? rows.map(normalizeSubscriptionLogRow).filter(item => item.seq > 0) : [];
+            if (!incoming.length) return;
+            const merged = new Map();
+            const first = prepend ? incoming.concat(subscriptionLogRows) : subscriptionLogRows.concat(incoming);
+            first.forEach(item => {
+                if (item.seq > 0) merged.set(item.seq, item);
+            });
+            subscriptionLogRows = Array.from(merged.values()).sort((a, b) => a.seq - b.seq);
+            syncSubscriptionLogBounds();
+        }
+
+        function applySubscriptionLogs(logs) {
+            mergeSubscriptionLogRows(logs);
+            trimSubscriptionLogWindow();
+            subscriptionLogHydrated = true;
+            renderSubscriptionLogRows();
+        }
+
+        function resetSubscriptionLogWindow() {
+            if (subscriptionLogRefreshTimer) {
+                window.clearTimeout(subscriptionLogRefreshTimer);
+                subscriptionLogRefreshTimer = null;
+            }
+            subscriptionLogRows = [];
+            subscriptionLogOldestSeq = 0;
+            subscriptionLogNewestSeq = 0;
+            subscriptionLogHasMoreBefore = false;
+            subscriptionLogLoading = false;
+            subscriptionLogFollowTail = true;
+            subscriptionLogPendingLatestSeq = 0;
+            subscriptionLogHydrated = false;
+            subscriptionLogLastPullAt = 0;
+            lastSubscriptionLogSignature = '';
+        }
+
+        function trimSubscriptionLogWindow() {
+            if (!subscriptionLogFollowTail) return;
+            const previousOldestSeq = subscriptionLogRows.length ? subscriptionLogRows[0].seq : 0;
+            const blocks = buildSubscriptionLogBlocks(subscriptionLogRows);
+            const nextRows = flattenSubscriptionLogBlocks(
+                tailSubscriptionLogBlocksByTaskCount(blocks, SUBSCRIPTION_LOG_RECENT_TASK_LIMIT)
+            );
+            if (nextRows.length === subscriptionLogRows.length) return;
+            subscriptionLogRows = nextRows;
+            syncSubscriptionLogBounds();
+            if (previousOldestSeq > 0 && subscriptionLogOldestSeq > previousOldestSeq) {
+                subscriptionLogHasMoreBefore = true;
+            }
+        }
+
+        function renderSubscriptionLogHistoryHint() {
+            const hint = document.getElementById('subscription-log-history-hint');
+            if (!hint) return;
+            if (subscriptionLogLoading) {
+                hint.className = 'mb-2 text-center text-xs text-slate-400';
+                hint.innerHTML = '正在加载历史日志...';
+                return;
+            }
+            if (subscriptionLogHasMoreBefore) {
+                hint.className = 'mb-2 text-center';
+                hint.innerHTML = '<button type="button" class="text-xs px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" data-subscription-log-load-before>加载更早日志</button>';
+                return;
+            }
+            hint.className = 'hidden mb-2 text-center';
+            hint.innerHTML = '';
+        }
+
+        function renderSubscriptionLogRows({ keepScroll = false } = {}) {
+            const box = document.getElementById('subscription-log-box');
+            if (!box) return;
+            if (!subscriptionLogRows.length) {
+                renderSubscriptionLogHistoryHint();
+            }
+            const previousScrollHeight = box.scrollHeight;
+            const previousScrollTop = box.scrollTop;
+            const wasAtBottom = (previousScrollHeight - previousScrollTop - box.clientHeight) < 24;
+            const logSignature = buildLogSignature(subscriptionLogRows, (item) => `${item?.seq || ''}:${item?.signature || ''}:${item?.level || 'info'}:${item?.text || ''}`);
+            if (logSignature !== lastSubscriptionLogSignature) {
+                box.innerHTML = subscriptionLogRows.map(item => {
+                    const displayItem = {
+                        ...item,
+                        text: String(item?.text || item?.display_text || ''),
+                    };
+                    return `<div class="${getLogEntryClass(displayItem)}">${formatMonitorLogHtml(displayItem)}</div>`;
+                }).join('');
+                lastSubscriptionLogSignature = logSignature;
+            }
+            renderSubscriptionLogHistoryHint();
+            if (keepScroll) {
+                box.scrollTop = previousScrollTop + Math.max(0, box.scrollHeight - previousScrollHeight);
+            } else if (subscriptionLogFollowTail && wasAtBottom) {
+                box.scrollTop = box.scrollHeight;
+            } else if (!subscriptionLogFollowTail) {
+                box.scrollTop = previousScrollTop;
+            }
+        }
+
+        async function fetchSubscriptionLogs({ after = 0, before = 0, limit = SUBSCRIPTION_LOG_PAGE_TASK_LIMIT, prepend = false } = {}) {
+            if (subscriptionLogLoading) return;
+            subscriptionLogLoading = true;
+            renderSubscriptionLogHistoryHint();
+            try {
+                const params = new URLSearchParams();
+                if (after > 0) params.set('after', String(after));
+                if (before > 0) params.set('before', String(before));
+                params.set('limit', String(limit));
+                const payload = await window.MediaHubApi.getJson(`/subscription/logs?${params.toString()}`);
+                const rows = Array.isArray(payload.logs) ? payload.logs : [];
+                mergeSubscriptionLogRows(rows, { prepend });
+                if (prepend || before > 0 || after <= 0) {
+                    subscriptionLogHasMoreBefore = !!payload.has_more_before;
+                } else {
+                    subscriptionLogHasMoreBefore = subscriptionLogHasMoreBefore || !!payload.has_more_before;
+                }
+                subscriptionLogHydrated = true;
+                if (!prepend) trimSubscriptionLogWindow();
+                renderSubscriptionLogRows({ keepScroll: prepend });
+            } catch (e) {
+                renderSubscriptionLogHistoryHint();
+            } finally {
+                subscriptionLogLoading = false;
+                renderSubscriptionLogHistoryHint();
+            }
+        }
+
+        function scheduleSubscriptionLogRefresh(latestSeq = 0) {
+            const normalizedLatestSeq = Number(latestSeq || 0);
+            if (normalizedLatestSeq > subscriptionLogPendingLatestSeq) {
+                subscriptionLogPendingLatestSeq = normalizedLatestSeq;
+            }
+            if (subscriptionLogRefreshTimer) return;
+            subscriptionLogRefreshTimer = window.setTimeout(async () => {
+                subscriptionLogRefreshTimer = null;
+                if (subscriptionLogLoading) {
+                    scheduleSubscriptionLogRefresh(subscriptionLogPendingLatestSeq);
+                    return;
+                }
+                const now = Date.now();
+                if (now - subscriptionLogLastPullAt < 600) {
+                    scheduleSubscriptionLogRefresh(subscriptionLogPendingLatestSeq);
+                    return;
+                }
+                subscriptionLogLastPullAt = now;
+                if (!subscriptionLogHydrated) {
+                    await fetchSubscriptionLogs({ limit: SUBSCRIPTION_LOG_RECENT_TASK_LIMIT });
+                    return;
+                }
+                if (subscriptionLogPendingLatestSeq > subscriptionLogNewestSeq) {
+                    await fetchSubscriptionLogs({ after: subscriptionLogNewestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT });
+                    if (subscriptionLogPendingLatestSeq > subscriptionLogNewestSeq) {
+                        scheduleSubscriptionLogRefresh(subscriptionLogPendingLatestSeq);
+                    }
+                }
+            }, 500);
+        }
+
+        function applySubscriptionLogMeta(logMeta) {
+            const meta = logMeta && typeof logMeta === 'object' ? logMeta : {};
+            const latestSeq = Number(meta.latest_seq || meta.total || meta.latest?.seq || 0);
+            subscriptionLogPendingLatestSeq = Math.max(subscriptionLogPendingLatestSeq, latestSeq);
+            if (!subscriptionLogHydrated) {
+                scheduleSubscriptionLogRefresh(latestSeq);
+                return;
+            }
+            if (latestSeq > subscriptionLogNewestSeq) {
+                scheduleSubscriptionLogRefresh(latestSeq);
+            }
+        }
+
+        function handleSubscriptionLogScroll() {
+            const box = document.getElementById('subscription-log-box');
+            if (!box) return;
+            const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 24;
+            subscriptionLogFollowTail = nearBottom;
+            if (box.scrollTop <= 4 && subscriptionLogHasMoreBefore && !subscriptionLogLoading) {
+                void fetchSubscriptionLogs({ before: subscriptionLogOldestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT, prepend: true });
+            }
+        }
+
+        function loadEarlierSubscriptionLogs() {
+            if (!subscriptionLogHasMoreBefore || subscriptionLogLoading) return;
+            void fetchSubscriptionLogs({ before: subscriptionLogOldestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT, prepend: true });
         }
 
         function normalizeSubscriptionMediaType(value) {
@@ -221,6 +507,40 @@
             const normalized = String(value || 'balanced').trim().toLowerCase();
             if (['balanced', 'ultra', 'fhd', 'hd', 'sd'].includes(normalized)) return normalized;
             return 'balanced';
+        }
+
+        function normalizeSubscriptionMinFileSizeMb(value) {
+            const raw = String(value ?? '0').trim().toLowerCase().replace(/\s+/g, '');
+            if (!raw) return 0;
+            let normalized = raw;
+            let multiplier = 1;
+            if (normalized.endsWith('gb')) {
+                multiplier = 1024;
+                normalized = normalized.slice(0, -2);
+            } else if (normalized.endsWith('g')) {
+                multiplier = 1024;
+                normalized = normalized.slice(0, -1);
+            } else if (normalized.endsWith('mb')) {
+                normalized = normalized.slice(0, -2);
+            } else if (normalized.endsWith('m')) {
+                normalized = normalized.slice(0, -1);
+            } else if (normalized.endsWith('kb')) {
+                multiplier = 1 / 1024;
+                normalized = normalized.slice(0, -2);
+            } else if (normalized.endsWith('k')) {
+                multiplier = 1 / 1024;
+                normalized = normalized.slice(0, -1);
+            }
+            const parsed = Number.parseFloat(normalized || '0') * multiplier;
+            if (!Number.isFinite(parsed)) return 0;
+            return Math.max(0, Math.round(parsed * 1000) / 1000);
+        }
+
+        function formatSubscriptionMinFileSizeMb(value) {
+            const normalized = normalizeSubscriptionMinFileSizeMb(value);
+            if (normalized <= 0) return '0';
+            const text = String(normalized);
+            return text.replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
         }
 
         function normalizeSubscriptionWeekdays(values) {
@@ -861,6 +1181,9 @@
             const excludeKeywords = parseSubscriptionExcludeKeywords(document.getElementById('subscription_exclude_keywords')?.value || '');
             const excludeInput = document.getElementById('subscription_exclude_keywords');
             if (excludeInput) excludeInput.value = excludeKeywords.join(', ');
+            const minFileSizeInput = document.getElementById('subscription_min_file_size_mb');
+            const minFileSizeMb = normalizeSubscriptionMinFileSizeMb(minFileSizeInput?.value || '0');
+            if (minFileSizeInput) minFileSizeInput.value = formatSubscriptionMinFileSizeMb(minFileSizeMb);
             return {
                 name: title,
                 provider,
@@ -885,6 +1208,7 @@
                 schedule_interval_minutes: scheduleIntervalMinutes,
                 min_score: parseInt(document.getElementById('subscription_min_score').value || '55', 10) || 55,
                 quality_priority: normalizeSubscriptionQualityPriority(document.getElementById('subscription_quality_priority').value || 'ultra'),
+                min_file_size_mb: minFileSizeMb,
                 enabled: document.getElementById('subscription_enabled').checked,
                 tmdb_id: tmdbBinding.tmdb_id,
                 tmdb_media_type: tmdbBinding.tmdb_media_type,
@@ -933,6 +1257,7 @@
             document.getElementById('subscription_schedule_end_time').value = '23:59';
             document.getElementById('subscription_schedule_interval_minutes').value = SUBSCRIPTION_DEFAULT_SCHEDULE_INTERVAL_MINUTES;
             document.getElementById('subscription_min_score').value = 55;
+            document.getElementById('subscription_min_file_size_mb').value = 0;
             document.getElementById('subscription_quality_priority').value = 'ultra';
             document.getElementById('subscription_enabled').checked = true;
             clearSubscriptionTmdbBinding({ silent: true });
@@ -1129,6 +1454,7 @@
                 ) || SUBSCRIPTION_DEFAULT_SCHEDULE_INTERVAL_MINUTES
             );
             document.getElementById('subscription_min_score').value = task.min_score ?? 55;
+            document.getElementById('subscription_min_file_size_mb').value = formatSubscriptionMinFileSizeMb(task.min_file_size_mb ?? 0);
             document.getElementById('subscription_quality_priority').value = normalizeSubscriptionQualityPriority(task.quality_priority || 'balanced');
             document.getElementById('subscription_enabled').checked = task.enabled !== false;
             setSubscriptionTmdbBinding({
@@ -1834,13 +2160,14 @@
                     setLastSubscriptionLogSignature: (nextValue) => {
                         lastSubscriptionLogSignature = String(nextValue || '');
                     },
-                    refreshSubscriptionState,
                 });
+                resetSubscriptionLogWindow();
+                await fetchSubscriptionLogs({ limit: SUBSCRIPTION_LOG_RECENT_TASK_LIMIT });
                 return;
             }
             try {
                 await window.MediaHubApi.postJson('/subscription/logs/clear');
-                lastSubscriptionLogSignature = '';
-                await refreshSubscriptionState();
+                resetSubscriptionLogWindow();
+                await fetchSubscriptionLogs({ limit: SUBSCRIPTION_LOG_RECENT_TASK_LIMIT });
             } catch (e) {}
         }

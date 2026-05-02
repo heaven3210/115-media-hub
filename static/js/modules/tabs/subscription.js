@@ -17,6 +17,8 @@ export function applySubscriptionState(data, {
     setLastSubscriptionRenderKey,
     renderSubscriptionTasks,
     renderSubscriptionLogs,
+    applySubscriptionLogs,
+    applySubscriptionLogMeta,
 } = {}) {
     if (!data) return;
     const currentSubscriptionState = typeof getSubscriptionState === 'function' ? (getSubscriptionState() || {}) : {};
@@ -24,7 +26,7 @@ export function applySubscriptionState(data, {
         ...currentSubscriptionState,
         ...data,
         tasks: Array.isArray(data.tasks) ? data.tasks : (currentSubscriptionState.tasks || []),
-        logs: Array.isArray(data.logs) ? data.logs : (currentSubscriptionState.logs || []),
+        logs: Array.isArray(data.logs) ? data.logs : [],
         queued: Array.isArray(data.queued) ? data.queued : (currentSubscriptionState.queued || []),
         next_runs: data.next_runs || currentSubscriptionState.next_runs || {},
         summary: data.summary || currentSubscriptionState.summary || { step: '空闲', detail: '等待订阅任务' }
@@ -47,7 +49,14 @@ export function applySubscriptionState(data, {
         if (typeof renderSubscriptionTasks === 'function') renderSubscriptionTasks();
         if (typeof setLastSubscriptionRenderKey === 'function') setLastSubscriptionRenderKey(renderKey);
     }
-    if (typeof renderSubscriptionLogs === 'function') renderSubscriptionLogs();
+    if (Array.isArray(data.logs) && typeof applySubscriptionLogs === 'function') {
+        applySubscriptionLogs(data.logs);
+    } else if (Array.isArray(data.logs) && typeof renderSubscriptionLogs === 'function') {
+        renderSubscriptionLogs();
+    }
+    if (typeof applySubscriptionLogMeta === 'function') {
+        applySubscriptionLogMeta(data.log_meta || { latest_seq: data.log_total || 0 });
+    }
 }
 
 export async function refreshSubscriptionState({ applySubscriptionState, compact = false } = {}) {
@@ -60,11 +69,7 @@ export async function refreshSubscriptionState({ applySubscriptionState, compact
 
 export async function clearSubscriptionLogs({
     setLastSubscriptionLogSignature,
-    refreshSubscriptionState,
 } = {}) {
     await window.MediaHubApi.postJson('/subscription/logs/clear');
     if (typeof setLastSubscriptionLogSignature === 'function') setLastSubscriptionLogSignature('');
-    if (typeof refreshSubscriptionState === 'function') {
-        await refreshSubscriptionState();
-    }
 }

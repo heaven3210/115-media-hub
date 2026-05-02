@@ -195,6 +195,25 @@ def parse_small_cjk_number(value: Any, default: int = 0, max_value: int = 200) -
 
     return parsed if 0 < parsed <= max_value else default
 
+def _parse_subscription_episode_token(raw_value: Any, *, max_digits: int = 4, max_value: int = 5000) -> int:
+    token = str(raw_value or "").strip()
+    if not token:
+        return 0
+
+    normalized = token.lstrip("0")
+    if not normalized:
+        return 0
+
+    if re.fullmatch(r"\d+", normalized):
+        if len(normalized) > max(1, int(max_digits or 4)):
+            return 0
+        value = int(normalized)
+        if 0 < value <= max(1, int(max_value or 5000)):
+            return value
+        return 0
+
+    return max(0, parse_small_cjk_number(token, default=0, max_value=max(1, int(max_value or 5000))))
+
 def parse_resource_episode_meta(item: Dict[str, Any]) -> Dict[str, int]:
     payload = item if isinstance(item, dict) else {}
     text = f"{payload.get('title', '')} {payload.get('raw_text', '')}"
@@ -204,20 +223,12 @@ def parse_resource_episode_meta(item: Dict[str, Any]) -> Dict[str, int]:
     range_start = 0
     range_end = 0
 
-    def _parse_episode_value(raw_value: Any) -> int:
-        token = str(raw_value or "").strip()
-        if not token:
-            return 0
-        if re.fullmatch(r"\d{1,4}", token):
-            return max(0, int(token or 0))
-        return max(0, parse_small_cjk_number(token, default=0, max_value=5000))
-
     for pattern in RESOURCE_EPISODE_RANGE_REGEXES:
         range_match = pattern.search(text)
         if not range_match:
             continue
-        start_episode = _parse_episode_value(range_match.group(1))
-        end_episode = _parse_episode_value(range_match.group(2))
+        start_episode = _parse_subscription_episode_token(range_match.group(1))
+        end_episode = _parse_subscription_episode_token(range_match.group(2))
         if start_episode <= 0 and end_episode <= 0:
             continue
         matched_fragment = str(range_match.group(0) or "")
@@ -237,7 +248,7 @@ def parse_resource_episode_meta(item: Dict[str, Any]) -> Dict[str, int]:
     se_match = RESOURCE_SEASON_EPISODE_REGEX.search(text)
     if se_match:
         season = max(0, int(se_match.group(1) or 0))
-        episode = max(0, int(se_match.group(2) or 0))
+        episode = _parse_subscription_episode_token(se_match.group(2))
     else:
         season_match = RESOURCE_SEASON_ONLY_REGEX.search(text)
         if season_match:
@@ -256,13 +267,13 @@ def parse_resource_episode_meta(item: Dict[str, Any]) -> Dict[str, int]:
             or RESOURCE_EPISODE_CODE_REGEX.search(text)
         )
         if episode_match:
-            episode = _parse_episode_value(episode_match.group(1))
+            episode = _parse_subscription_episode_token(episode_match.group(1))
         if episode <= 0:
             for pattern in RESOURCE_EPISODE_PROGRESS_REGEXES:
                 progress_match = pattern.search(text)
                 if not progress_match:
                     continue
-                episode = _parse_episode_value(progress_match.group(1))
+                episode = _parse_subscription_episode_token(progress_match.group(1))
                 if episode > 0:
                     break
 
@@ -274,7 +285,7 @@ def parse_resource_episode_meta(item: Dict[str, Any]) -> Dict[str, int]:
     for pattern in RESOURCE_TOTAL_EPISODES_REGEXES:
         matched = pattern.search(text)
         if matched:
-            total = _parse_episode_value(matched.group(1))
+            total = _parse_subscription_episode_token(matched.group(1))
             break
 
     has_collection_hint = bool(RESOURCE_COLLECTION_HINT_REGEX.search(text))
@@ -301,7 +312,7 @@ def match_subscription_media_type(task: Dict[str, Any], item: Dict[str, Any]) ->
     has_episode_meta = bool(int(meta.get("season", 0) or 0) > 0 or int(meta.get("episode", 0) or 0) > 0 or int(meta.get("total", 0) or 0) > 0)
     tv_hint = bool(
         re.search(
-            r"(电视剧|剧集|番剧|动漫|第\s*[一二三四五六七八九十两兩0-9]+\s*(?:季|集|话|話)|season\s*\d+|s\d{1,2}\s*e?\d{0,3}|ep\s*\d{1,3}|更新至\s*\d+\s*(?:集|話|话)|全\s*\d+\s*(?:集|話|话)|完结|完結)",
+            r"(电视剧|剧集|番剧|动漫|第\s*[一二三四五六七八九十两兩0-9]+\s*(?:季|集|话|話)|season\s*\d+|s\d{1,2}\s*e?\d{0,4}|ep\s*\d{1,4}|更新至\s*\d+\s*(?:集|話|话)|全\s*\d+\s*(?:集|話|话)|完结|完結)",
             text,
             re.IGNORECASE,
         )

@@ -49,6 +49,9 @@ def _format_subscription_share_scan_log_tail(stats: Dict[str, Any], *, include_c
         parts.append(f"提供方统计 {provider_reported_entries} 条")
     if include_candidates:
         parts.append(f"候选文件 {candidate_count} 个")
+    skipped_small_files = max(0, int(payload.get("skipped_small_files", 0) or 0))
+    if skipped_small_files > 0:
+        parts.append(f"小文件过滤 {skipped_small_files} 个")
     if bool(payload.get("truncated", False)):
         parts.append(
             f"已截断：{_format_subscription_share_scan_truncated_reason(payload.get('truncated_reason', ''))}"
@@ -543,6 +546,8 @@ async def _write_subscription_task_overview(
         batch_refresh_label = "关闭"
 
     exclude_keywords = normalize_subscription_exclude_keywords(task.get("exclude_keywords", []))
+    min_file_size_mb = normalize_subscription_min_file_size_mb(task.get("min_file_size_mb", 0))
+    file_size_filter_tail = f" | 最小文件: {min_file_size_mb:g}MB" if min_file_size_mb > 0 else ""
     await write_subscription_section("任务信息")
     await write_subscription_log(
         (
@@ -556,10 +561,12 @@ async def _write_subscription_task_overview(
     await write_subscription_log(
         f"保存路径: {str(task.get('savepath', '') or '--').strip()} | 执行批次: {subscription_run_id} | "
         f"批次收口刷新: {batch_refresh_label}"
+        + file_size_filter_tail
         + (f" | 排除词: {', '.join(exclude_keywords[:5])}" if exclude_keywords else ""),
         "info",
         compact=f"保存路径: {str(task.get('savepath', '') or '--').strip()} | "
                 f"批次收口: {batch_refresh_label}"
+                + (f" | 最小文件 {min_file_size_mb:g}MB" if min_file_size_mb > 0 else "")
                 + (f" | 排除词: {len(exclude_keywords)}个" if exclude_keywords else ""),
     )
 

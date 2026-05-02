@@ -216,31 +216,31 @@
             }).join('');
         }
 
-        function selectResourceFavoriteDir(index) {
+        async function selectResourceFavoriteDir(index) {
             const dirs = getResourceFavoriteDirs();
             const item = dirs[Math.max(0, Number(index || 0))];
             const path = normalizeRelativePathInput(item?.path || '');
             if (!path) return;
-            resourceFolderTrail = [{ id: '0', name: '根目录' }];
+            let selectedTrail = [{ id: '0', name: '根目录' }];
+            let selectedFolderId = '0';
+            try {
+                const resolved = await resolveResourceFolderTrailByPath(path);
+                if (resolved?.valid && Array.isArray(resolved.trail) && resolved.trail.length) {
+                    selectedTrail = normalizeResourceFolderTrail(resolved.trail);
+                    selectedFolderId = String(selectedTrail[selectedTrail.length - 1]?.id || '0').trim() || '0';
+                }
+            } catch (e) {}
+
+            resourceFolderTrail = selectedTrail;
             resourceFolderEntries = [];
             resourceFolderSummary = { folder_count: 0, file_count: 0 };
             resourceFolderEntriesComplete = false;
             resourceFolderShowAllFiles = false;
-            setSelectedResourceFolder('0', path, {
+            setSelectedResourceFolder(selectedFolderId, path, {
                 loadPreview: false,
                 persist: true,
-                trail: resourceFolderTrail,
+                trail: selectedTrail,
             });
-            // 直接写一次 localStorage 保证常用目录选择必被记录
-            try {
-                var memProvider = getCurrentResourceProvider() === 'quark' ? 'quark' : '115';
-                localStorage.setItem('resource-folder-selection-v2:' + memProvider, JSON.stringify({
-                    provider: memProvider,
-                    folder_id: '0',
-                    display_path: path,
-                    trail: [{ id: '0', name: '根目录' }]
-                }));
-            } catch (e) {}
             renderResourceFavoriteDirs();
             showToast(`已选择常用目录：${path}`, { tone: 'success', duration: 2200, placement: 'top-center' });
         }

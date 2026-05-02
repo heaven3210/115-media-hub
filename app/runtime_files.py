@@ -143,6 +143,21 @@ def read_log_tail(path: str, limit: int = 200) -> List[str]:
     return compact[-normalized_limit:]
 
 
+def read_log_lines(path: str, limit: int = 0) -> List[str]:
+    normalized_limit = max(0, int(limit or 0))
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = [line.rstrip("\n") for line in f.readlines()]
+    except Exception:
+        return []
+    compact = [line for line in lines if str(line or "").strip()]
+    if normalized_limit > 0:
+        return compact[-normalized_limit:]
+    return compact
+
+
 def infer_log_level_from_text(text: str) -> str:
     normalized = str(text or "")
     if "━━━━━━━━━━" in normalized:

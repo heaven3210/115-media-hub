@@ -19,6 +19,14 @@ async def get_subscription_status(request: Request) -> Dict[str, Any]:
     return build_subscription_status_payload(compact=compact)
 
 
+@router.get("/subscription/logs")
+async def get_subscription_logs(request: Request) -> Dict[str, Any]:
+    after = parse_int_param(request.query_params.get("after"), 0)
+    before = parse_int_param(request.query_params.get("before"), 0)
+    limit = parse_int_param(request.query_params.get("limit"), SUBSCRIPTION_LOG_TASK_PAGE_LIMIT)
+    return build_subscription_log_page_payload(after=after, before=before, limit=limit)
+
+
 @router.get("/subscription/episodes")
 async def get_subscription_task_episodes(request: Request) -> Dict[str, Any]:
     task_name = str(request.query_params.get("name", "") or "").strip()
@@ -37,9 +45,7 @@ async def get_subscription_task_episodes(request: Request) -> Dict[str, Any]:
 
 @router.post("/subscription/logs/clear")
 async def clear_subscription_logs(request: Request) -> Dict[str, Any]:
-    subscription_status["logs"] = [{"text": f"{format_log_time(True)} 订阅日志已清空", "level": "info"}]
-    await asyncio.to_thread(clear_log_file, SUBSCRIPTION_LOG_PATH, f"{format_log_time(True)} 订阅日志已清空")
-    schedule_ui_state_push(0)
+    await clear_subscription_log_history()
     return {"ok": True}
 
 

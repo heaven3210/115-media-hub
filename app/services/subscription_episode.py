@@ -303,8 +303,8 @@ def _extract_numeric_episode_from_filename(file_name: str) -> int:
         return 0
 
     for pattern in (
-        re.compile(r"^0*(\d{1,3})$"),
-        re.compile(r"^第?0*(\d{1,3})(?:集|话|話)?$", re.IGNORECASE),
+        re.compile(r"^0*(\d{1,4})$"),
+        re.compile(r"^第?0*(\d{1,4})(?:集|话|話)?$", re.IGNORECASE),
     ):
         matched = pattern.fullmatch(compact)
         if not matched:
@@ -314,7 +314,7 @@ def _extract_numeric_episode_from_filename(file_name: str) -> int:
             return value
 
     quality_tail_match = re.match(
-        r"^(?:第\s*)?0*(\d{1,3})(?:\s*(?:集|话|話))?(?P<suffix>[\s._\-+(){}\[\]<>【】（）「」《》]+.+)$",
+        r"^(?:第\s*)?0*(\d{1,4})(?:\s*(?:集|话|話))?(?P<suffix>[\s._\-+(){}\[\]<>【】（）「」《》]+.+)$",
         stem_tail_numeric,
         re.IGNORECASE,
     )
@@ -433,7 +433,7 @@ def _candidate_anchor_episode(candidate: Dict[str, Any], episode_upper_bound: in
     anchor = max(0, int((candidate or {}).get("episode", 0) or 0))
     upper_bound = max(0, int(episode_upper_bound or 0))
     if upper_bound > 0 and anchor > upper_bound:
-        anchor = upper_bound
+        return 0
     return anchor
 
 

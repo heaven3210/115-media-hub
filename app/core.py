@@ -2,6 +2,7 @@ import asyncio
 import contextvars
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -158,6 +159,7 @@ from .runtime_files import (
     join_remote_path,
     normalize_relative_path,
     normalize_remote_path,
+    read_log_lines,
     read_log_tail,
     rotate_log_file_if_needed,
 )
@@ -355,6 +357,32 @@ UI_STATUS_LOG_MEMORY_LIMIT = max(
     UI_STATUS_LOG_TAIL_LIMIT,
     min(500, int(os.environ.get("UI_STATUS_LOG_MEMORY_LIMIT", 220) or 220)),
 )
+SUBSCRIPTION_UI_RECENT_TASK_LOG_LIMIT = max(
+    1,
+    min(
+        20,
+        int(
+            os.environ.get(
+                "SUBSCRIPTION_UI_RECENT_TASK_LOG_LIMIT",
+                os.environ.get("SUBSCRIPTION_UI_RECENT_LOG_LIMIT", 5),
+            )
+            or 5
+        ),
+    ),
+)
+SUBSCRIPTION_LOG_TASK_PAGE_LIMIT = max(
+    1,
+    min(
+        20,
+        int(
+            os.environ.get(
+                "SUBSCRIPTION_LOG_TASK_PAGE_LIMIT",
+                os.environ.get("SUBSCRIPTION_LOG_PAGE_LIMIT", 5),
+            )
+            or 5
+        ),
+    ),
+)
 TG_SYNC_TTL_SECONDS = 5 * 60
 RESOURCE_CHANNEL_CACHE_LIMIT = max(1, int(os.environ.get("RESOURCE_CHANNEL_CACHE_LIMIT", 10) or 10))
 RESOURCE_CHANNEL_CACHE_GLOBAL_LIMIT = max(
@@ -494,16 +522,16 @@ TMDB_SEARCH_LIMIT = max(1, min(20, int(os.environ.get("TMDB_SEARCH_LIMIT", 12) o
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 FAVICON_PATH = os.path.join(STATIC_DIR, "icons", "favicon.svg")
 USERSCRIPT_MAGNET_HELPER_PATH = os.path.join(BASE_DIR, "115-magnet-helper-webhook.user.js")
-RESOURCE_SEASON_EPISODE_REGEX = re.compile(r"\bS(?:0|O)?(\d{1,2})\s*[-_. ]?\s*E(?:0|O)?(\d{1,3})\b", re.IGNORECASE)
-RESOURCE_EPISODE_ONLY_REGEX = re.compile(r"(?:第\s*)(\d{1,3})\s*(?:集|話|话)\b", re.IGNORECASE)
+RESOURCE_SEASON_EPISODE_REGEX = re.compile(r"\bS(?:0|O)?(\d{1,2})\s*[-_. ]?\s*E(?:0|O)?(\d{1,4})\b", re.IGNORECASE)
+RESOURCE_EPISODE_ONLY_REGEX = re.compile(r"(?:第\s*)(\d{1,4})\s*(?:集|話|话)\b", re.IGNORECASE)
 RESOURCE_EPISODE_ONLY_CN_REGEX = re.compile(r"(?:第\s*)([零〇一二三四五六七八九十两兩]{1,4})\s*(?:集|話|话)\b", re.IGNORECASE)
-RESOURCE_EPISODE_CODE_REGEX = re.compile(r"(?<!\d)(?:EP|E)\s*[-_. ]?\s*(\d{1,3})\b", re.IGNORECASE)
+RESOURCE_EPISODE_CODE_REGEX = re.compile(r"(?<!\d)(?:EP|E)\s*[-_. ]?\s*(\d{1,4})\b", re.IGNORECASE)
 RESOURCE_EPISODE_RANGE_REGEXES = [
     re.compile(
         r"(?:第?\s*)([零〇一二三四五六七八九十两兩\d]{1,4})\s*[-~～—–－至到]\s*([零〇一二三四五六七八九十两兩\d]{1,4})\s*(?:集|話|话)?\b",
         re.IGNORECASE,
     ),
-    re.compile(r"(?:EP|E)?\s*(\d{1,3})\s*[-~～—–－至到]\s*(?:EP|E)?\s*(\d{1,3})\b", re.IGNORECASE),
+    re.compile(r"(?:EP|E)?\s*(\d{1,4})\s*[-~～—–－至到]\s*(?:EP|E)?\s*(\d{1,4})\b", re.IGNORECASE),
     re.compile(
         r"(?:更新至|更至|更新到|更到)\s*([零〇一二三四五六七八九十两兩\d]{1,4})\s*[-~～—–－至到]\s*([零〇一二三四五六七八九十两兩\d]{1,4})\s*(?:集|話|话)?\b",
         re.IGNORECASE,
@@ -511,18 +539,18 @@ RESOURCE_EPISODE_RANGE_REGEXES = [
 ]
 RESOURCE_EPISODE_PROGRESS_REGEXES = [
     re.compile(r"(?:更新至|更至|更新到|更到|至|到)\s*([零〇一二三四五六七八九十两兩\d]{1,4})\s*(?:集|話|话)\b", re.IGNORECASE),
-    re.compile(r"\b(?:EP|E)\s*[-_. ]?(\d{1,3})\s*(?:END|FIN)\b", re.IGNORECASE),
+    re.compile(r"\b(?:EP|E)\s*[-_. ]?(\d{1,4})\s*(?:END|FIN)\b", re.IGNORECASE),
 ]
 RESOURCE_SEASON_ONLY_REGEX = re.compile(r"(?:第\s*)(\d{1,2})\s*季\b", re.IGNORECASE)
 RESOURCE_SEASON_ONLY_CN_REGEX = re.compile(r"(?:第\s*)([零〇一二三四五六七八九十两兩\d]{1,4})\s*季\b", re.IGNORECASE)
 RESOURCE_SEASON_ENGLISH_REGEX = re.compile(r"\bSeason\s*(?:0|O)?(\d{1,2})\b", re.IGNORECASE)
 RESOURCE_TOTAL_EPISODES_REGEXES = [
-    re.compile(r"(?:全|共)\s*(\d{1,3})\s*(?:集|話|话)\b", re.IGNORECASE),
-    re.compile(r"(\d{1,3})\s*(?:集|話|话)\s*(?:全|完结|完結)\b", re.IGNORECASE),
-    re.compile(r"(?:更新至|更至)\s*(\d{1,3})\s*(?:集|話|话)\b", re.IGNORECASE),
+    re.compile(r"(?:全|共)\s*(\d{1,4})\s*(?:集|話|话)\b", re.IGNORECASE),
+    re.compile(r"(\d{1,4})\s*(?:集|話|话)\s*(?:全|完结|完結)\b", re.IGNORECASE),
+    re.compile(r"(?:更新至|更至)\s*(\d{1,4})\s*(?:集|話|话)\b", re.IGNORECASE),
 ]
 RESOURCE_COLLECTION_HINT_REGEX = re.compile(
-    r"(全集|完结|完結|合集|合輯|全\s*\d{1,3}\s*(?:集|話|话)|\d{1,3}\s*(?:集|話|话)\s*全)",
+    r"(全集|完结|完結|合集|合輯|全\s*\d{1,4}\s*(?:集|話|话)|\d{1,4}\s*(?:集|話|话)\s*全)",
     re.IGNORECASE,
 )
 CJK_NUMERAL_DIGITS: Dict[str, int] = {
@@ -779,6 +807,37 @@ def normalize_subscription_provider(value: Any, fallback: str = "115") -> str:
     if normalized in ("pan.quark", "quarkshare", "quark_pan"):
         return "quark"
     return "quark" if normalized_fallback == "quark" else "115"
+
+
+def normalize_subscription_min_file_size_mb(value: Any, fallback: float = 0.0) -> float:
+    raw = str(value if value is not None else fallback).strip().lower()
+    if not raw:
+        raw = str(fallback or 0)
+    normalized = re.sub(r"\s+", "", raw)
+    multiplier = 1.0
+    if normalized.endswith("gb"):
+        multiplier = 1024.0
+        normalized = normalized[:-2]
+    elif normalized.endswith("g"):
+        multiplier = 1024.0
+        normalized = normalized[:-1]
+    elif normalized.endswith("mb"):
+        normalized = normalized[:-2]
+    elif normalized.endswith("m"):
+        normalized = normalized[:-1]
+    elif normalized.endswith("kb"):
+        multiplier = 1.0 / 1024.0
+        normalized = normalized[:-2]
+    elif normalized.endswith("k"):
+        multiplier = 1.0 / 1024.0
+        normalized = normalized[:-1]
+    try:
+        parsed = float(normalized or fallback or 0) * multiplier
+    except (TypeError, ValueError, OverflowError):
+        parsed = float(fallback or 0)
+    if not math.isfinite(parsed):
+        parsed = float(fallback or 0)
+    return round(max(0.0, parsed), 3)
 
 
 def normalize_subscription_schedule_weekdays(value: Any) -> List[int]:
@@ -1324,6 +1383,7 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
     quality_priority = normalize_subscription_quality_priority(
         task.get("quality_priority", SUBSCRIPTION_QUALITY_PRIORITY_DEFAULT)
     )
+    min_file_size_mb = normalize_subscription_min_file_size_mb(task.get("min_file_size_mb", 0))
     anime_mode = bool(task.get("anime_mode", False))
     multi_season_mode = bool(task.get("multi_season_mode", anime_mode))
     tmdb_media_type = normalize_tmdb_media_type(task.get("tmdb_media_type", ""), fallback=media_type)
@@ -1423,6 +1483,7 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "schedule_interval_minutes": schedule_interval_minutes,
         "min_score": max(30, min(100, min_score)),
         "quality_priority": quality_priority,
+        "min_file_size_mb": min_file_size_mb,
         # 向后兼容：anime_mode 为旧字段，语义已等同于 multi_season_mode。
         "anime_mode": multi_season_mode,
         "multi_season_mode": multi_season_mode,
@@ -3010,6 +3071,20 @@ def match_monitor_task_for_savepath(cfg: Dict[str, Any], savepath: str, provider
 
 
 def restore_runtime_logs_from_files() -> None:
+    global subscription_log_seq
+
+    def build_subscription_restore_entry(line: str, seq: int) -> Dict[str, Any]:
+        raw_text = re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", line, count=1).strip()
+        display_text = _build_subscription_log_display_text(raw_text, {})
+        return {
+            "seq": seq,
+            "text": display_text,
+            "display_text": display_text,
+            "raw_text": raw_text,
+            "level": infer_log_level_from_text(line),
+            "signature": hashlib.sha1(line.encode("utf-8")).hexdigest()[:12],
+        }
+
     main_lines = read_log_tail(MAIN_LOG_PATH, limit=UI_STATUS_LOG_MEMORY_LIMIT)
     if main_lines:
         task_status["logs"] = [
@@ -3024,22 +3099,13 @@ def restore_runtime_logs_from_files() -> None:
             for line in monitor_lines
         ]
 
-    subscription_lines = read_log_tail(SUBSCRIPTION_LOG_PATH, limit=UI_STATUS_LOG_MEMORY_LIMIT)
+    subscription_lines = read_log_lines(SUBSCRIPTION_LOG_PATH)
     if subscription_lines:
+        subscription_log_seq = len(subscription_lines)
+        tail_start_seq = max(0, len(subscription_lines) - UI_STATUS_LOG_MEMORY_LIMIT)
         subscription_status["logs"] = [
-            {
-                "text": _build_subscription_log_display_text(
-                    re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", line, count=1).strip(),
-                    {},
-                ),
-                "display_text": _build_subscription_log_display_text(
-                    re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", line, count=1).strip(),
-                    {},
-                ),
-                "level": infer_log_level_from_text(line),
-                "signature": hashlib.sha1(line.encode("utf-8")).hexdigest()[:12],
-            }
-            for line in subscription_lines
+            build_subscription_restore_entry(line, tail_start_seq + index + 1)
+            for index, line in enumerate(subscription_lines[tail_start_seq:])
         ]
 
 
@@ -3153,6 +3219,7 @@ subscription_log_context_var: contextvars.ContextVar[Optional[Dict[str, Any]]] =
     "subscription_log_context",
     default=None,
 )
+subscription_log_seq = 0
 sign115_status = {
     "state": "idle",
     "message": "尚未检查签到状态",
@@ -3686,6 +3753,529 @@ def _tail_jsonable_logs(logs: Any, limit: int = UI_STATUS_LOG_TAIL_LIMIT) -> Lis
     return clone_jsonable(tail)
 
 
+def _serialize_subscription_ui_log(entry: Any) -> Dict[str, str]:
+    payload = entry if isinstance(entry, dict) else {}
+    seq = max(0, int(payload.get("seq", 0) or 0))
+    display_text = str(payload.get("display_text") or payload.get("text") or "").strip()
+    level = str(payload.get("level", "info") or "info").strip().lower() or "info"
+    signature = str(payload.get("signature", "") or "").strip()
+    if not signature:
+        signature = hashlib.sha1(f"{level}:{display_text}".encode("utf-8")).hexdigest()[:12]
+    return {
+        "seq": seq,
+        "text": display_text,
+        "level": level,
+        "signature": signature,
+    }
+
+
+def _extract_subscription_candidate_episode_preview(text: str) -> str:
+    values = re.findall(r"E\s*0*(\d{1,4})", str(text or ""), flags=re.IGNORECASE)
+    if not values:
+        return ""
+    normalized: List[int] = []
+    seen: Set[int] = set()
+    for value in values:
+        episode = int(value or "0")
+        if episode <= 0 or episode in seen:
+            continue
+        seen.add(episode)
+        normalized.append(episode)
+    if not normalized:
+        return ""
+    if len(normalized) == 1:
+        return f"E{normalized[0]}"
+    if len(normalized) == 2:
+        return f"E{normalized[0]}、E{normalized[1]}"
+    return f"E{normalized[0]}-E{normalized[-1]}"
+
+
+def _extract_subscription_candidate_title_preview(text: str) -> str:
+    raw_text = str(text or "").strip()
+    title = ""
+    for pattern in (
+        r"导入成功：(.+?)(?:（评分|，命中|，文件|$)",
+        r"开始执行：(.+)$",
+    ):
+        match = re.search(pattern, raw_text)
+        if match:
+            title = str(match.group(1) or "").strip()
+            break
+    if not title:
+        return ""
+    title = re.sub(r"\s+", " ", title).strip(" ｜|，,。；;")
+    if len(title) > 48:
+        title = f"{title[:45]}..."
+    return title
+
+
+def _parse_subscription_candidate_ui_log(entry: Any) -> Optional[Dict[str, Any]]:
+    payload = entry if isinstance(entry, dict) else {}
+    raw_text = str(payload.get("raw_text") or payload.get("text") or "").strip()
+    match = re.search(r"候选资源\s*#?(\d+)", raw_text)
+    if not match:
+        return None
+    index = int(match.group(1) or "0")
+    if index <= 0:
+        return None
+
+    miss_tokens = (
+        "未命中",
+        "未能",
+        "已跳过",
+        "跳过",
+        "失败",
+        "超时",
+        "超出",
+        "不高于当前进度",
+        "无缺失",
+        "目标目录已存在",
+        "目录已覆盖",
+        "集数重复",
+        "链接命中失效缓存",
+        "继续尝试下一个",
+    )
+    hit_tokens = (
+        "导入成功",
+        "已创建",
+        "命中历史任务",
+    )
+    is_miss = any(token in raw_text for token in miss_tokens)
+    is_hit = any(token in raw_text for token in hit_tokens) and not is_miss
+    status = "hit" if is_hit else ("miss" if is_miss else "neutral")
+    return {
+        "seq": max(0, int(payload.get("seq", 0) or 0)),
+        "index": index,
+        "status": status,
+        "episode": _extract_subscription_candidate_episode_preview(raw_text),
+        "title": _extract_subscription_candidate_title_preview(raw_text),
+        "level": str(payload.get("level", "info") or "info").strip().lower() or "info",
+        "signature": str(payload.get("signature", "") or "").strip(),
+    }
+
+
+def _format_subscription_candidate_miss_log(
+    start: int,
+    end: int,
+    count: int,
+    first_signature: str,
+    last_signature: str,
+    first_seq: int = 0,
+    last_seq: int = 0,
+) -> Dict[str, Any]:
+    if start == end:
+        text = f"候选资源 {start} 未命中"
+    else:
+        text = f"候选资源 {start}-{end} 未命中"
+    if count > 0 and count != max(1, end - start + 1):
+        text = f"{text}（{count} 条）"
+    signature = hashlib.sha1(f"candidate-miss:{start}:{end}:{count}:{first_signature}:{last_signature}".encode("utf-8")).hexdigest()[:12]
+    seq = max(0, int(last_seq or first_seq or 0))
+    return {"seq": seq, "text": text, "level": "info", "signature": signature}
+
+
+def _format_subscription_candidate_hit_log(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    index = max(1, int(candidate.get("index", 0) or 0))
+    episode = str(candidate.get("episode", "") or "").strip()
+    title = str(candidate.get("title", "") or "").strip()
+    text = f"候选资源 {index} 命中"
+    detail_parts = []
+    if title:
+        detail_parts.append(f"资源：{title}")
+    if episode:
+        detail_parts.append(f"集数：{episode}")
+    if detail_parts:
+        text = f"{text} | {' | '.join(detail_parts)}"
+    signature = str(candidate.get("signature", "") or "").strip()
+    if not signature:
+        signature = hashlib.sha1(f"candidate-hit:{index}:{title}:{episode}".encode("utf-8")).hexdigest()[:12]
+    level = str(candidate.get("level", "success") or "success").strip().lower() or "success"
+    seq = max(0, int(candidate.get("seq", 0) or 0))
+    return {"seq": seq, "text": text, "level": level, "signature": signature}
+
+
+def _compact_subscription_candidate_ui_logs(logs: Any) -> List[Dict[str, str]]:
+    if not isinstance(logs, list):
+        return []
+    compacted: List[Dict[str, str]] = []
+    pending_start = 0
+    pending_end = 0
+    pending_count = 0
+    pending_first_signature = ""
+    pending_last_signature = ""
+    pending_first_seq = 0
+    pending_last_seq = 0
+    shown_hit_indexes: Set[int] = set()
+
+    def flush_pending_misses() -> None:
+        nonlocal pending_start, pending_end, pending_count, pending_first_signature, pending_last_signature
+        nonlocal pending_first_seq, pending_last_seq
+        if pending_count <= 0:
+            return
+        compacted.append(
+            _format_subscription_candidate_miss_log(
+                pending_start,
+                pending_end,
+                pending_count,
+                pending_first_signature,
+                pending_last_signature,
+                pending_first_seq,
+                pending_last_seq,
+            )
+        )
+        pending_start = 0
+        pending_end = 0
+        pending_count = 0
+        pending_first_signature = ""
+        pending_last_signature = ""
+        pending_first_seq = 0
+        pending_last_seq = 0
+
+    for entry in logs:
+        candidate = _parse_subscription_candidate_ui_log(entry)
+        if not candidate:
+            flush_pending_misses()
+            compacted.append(_serialize_subscription_ui_log(entry))
+            continue
+        status = str(candidate.get("status", "") or "").strip()
+        if status == "neutral":
+            continue
+        if status == "hit":
+            index = max(1, int(candidate.get("index", 0) or 0))
+            if index in shown_hit_indexes:
+                continue
+            shown_hit_indexes.add(index)
+            flush_pending_misses()
+            compacted.append(_format_subscription_candidate_hit_log(candidate))
+            continue
+        index = max(1, int(candidate.get("index", 0) or 0))
+        signature = str(candidate.get("signature", "") or "").strip()
+        seq = max(0, int(candidate.get("seq", 0) or 0))
+        if pending_count <= 0:
+            pending_start = index
+            pending_first_signature = signature
+            pending_first_seq = seq
+        pending_end = index
+        pending_last_signature = signature
+        pending_last_seq = seq
+        pending_count += 1
+    flush_pending_misses()
+    return compacted
+
+
+def _subscription_log_text_for_boundary(entry: Any) -> str:
+    payload = entry if isinstance(entry, dict) else {}
+    return str(payload.get("raw_text") or payload.get("display_text") or payload.get("text") or "").strip()
+
+
+def _is_subscription_task_log_start(entry: Any) -> bool:
+    text = _subscription_log_text_for_boundary(entry)
+    return "订阅开始" in text
+
+
+def _is_subscription_task_log_end(entry: Any) -> bool:
+    text = _subscription_log_text_for_boundary(entry)
+    return "订阅结束" in text
+
+
+def _build_subscription_log_blocks(entries: Any) -> List[Dict[str, Any]]:
+    if not isinstance(entries, list):
+        return []
+    blocks: List[Dict[str, Any]] = []
+    active_task_block: Optional[Dict[str, Any]] = None
+
+    def append_entry_to_block(block: Dict[str, Any], entry: Dict[str, Any]) -> None:
+        block_entries = block.setdefault("entries", [])
+        block_entries.append(entry)
+        seq = max(0, int(entry.get("seq", 0) or 0))
+        if seq <= 0:
+            return
+        if int(block.get("start_seq", 0) or 0) <= 0:
+            block["start_seq"] = seq
+        block["end_seq"] = seq
+
+    for raw_entry in entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = raw_entry
+        if _is_subscription_task_log_start(entry):
+            active_task_block = {
+                "task": True,
+                "start_seq": 0,
+                "end_seq": 0,
+                "entries": [],
+            }
+            blocks.append(active_task_block)
+            append_entry_to_block(active_task_block, entry)
+            if _is_subscription_task_log_end(entry):
+                active_task_block = None
+            continue
+
+        if active_task_block is not None:
+            append_entry_to_block(active_task_block, entry)
+            if _is_subscription_task_log_end(entry):
+                active_task_block = None
+            continue
+
+        if not blocks or bool(blocks[-1].get("task")):
+            blocks.append(
+                {
+                    "task": False,
+                    "start_seq": 0,
+                    "end_seq": 0,
+                    "entries": [],
+                }
+            )
+        append_entry_to_block(blocks[-1], entry)
+
+    return [
+        block
+        for block in blocks
+        if isinstance(block.get("entries"), list) and block.get("entries")
+    ]
+
+
+def _flatten_subscription_log_blocks(blocks: Any) -> List[Dict[str, Any]]:
+    flattened: List[Dict[str, Any]] = []
+    if not isinstance(blocks, list):
+        return flattened
+    for block in blocks:
+        entries = block.get("entries", []) if isinstance(block, dict) else []
+        if isinstance(entries, list):
+            flattened.extend(entry for entry in entries if isinstance(entry, dict))
+    return flattened
+
+
+def _tail_subscription_log_blocks_by_task_count(
+    blocks: List[Dict[str, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], int, int]:
+    normalized_limit = max(1, int(limit or 1))
+    if not blocks:
+        return [], 0, 0
+    task_count = sum(1 for block in blocks if bool(block.get("task")))
+    if task_count <= 0:
+        start_index = max(0, len(blocks) - normalized_limit)
+        return blocks[start_index:], start_index, len(blocks)
+    remaining_tasks = normalized_limit
+    start_index = 0
+    for index in range(len(blocks) - 1, -1, -1):
+        if bool(blocks[index].get("task")):
+            remaining_tasks -= 1
+        if remaining_tasks <= 0:
+            start_index = index
+            break
+    return blocks[start_index:], start_index, len(blocks)
+
+
+def _head_subscription_log_blocks_by_task_count(
+    blocks: List[Dict[str, Any]],
+    limit: int,
+) -> Tuple[List[Dict[str, Any]], int, int]:
+    normalized_limit = max(1, int(limit or 1))
+    if not blocks:
+        return [], 0, 0
+    task_count = sum(1 for block in blocks if bool(block.get("task")))
+    if task_count <= 0:
+        end_index = min(len(blocks), normalized_limit)
+        return blocks[:end_index], 0, end_index
+    seen_tasks = 0
+    end_index = len(blocks)
+    for index, block in enumerate(blocks):
+        if bool(block.get("task")):
+            seen_tasks += 1
+        if seen_tasks >= normalized_limit:
+            end_index = index + 1
+            break
+    return blocks[:end_index], 0, end_index
+
+
+def _tail_subscription_ui_logs(logs: Any, limit: int = SUBSCRIPTION_UI_RECENT_TASK_LOG_LIMIT) -> List[Dict[str, str]]:
+    compacted = _compact_subscription_candidate_ui_logs(logs)
+    blocks = _build_subscription_log_blocks(compacted)
+    selected_blocks, _, _ = _tail_subscription_log_blocks_by_task_count(blocks, max(1, int(limit or 1)))
+    return _flatten_subscription_log_blocks(selected_blocks)
+
+
+def _next_subscription_log_seq() -> int:
+    global subscription_log_seq
+    subscription_log_seq += 1
+    return subscription_log_seq
+
+
+def build_subscription_log_preview(logs: Any = None) -> Dict[str, Any]:
+    source = logs if isinstance(logs, list) else subscription_status.get("logs", [])
+    if not isinstance(source, list) or not source:
+        return {
+            "seq": int(subscription_log_seq or 0),
+            "text": "",
+            "level": "info",
+            "signature": "",
+        }
+    entry = source[-1] if isinstance(source[-1], dict) else {}
+    return {
+        "seq": max(0, int(entry.get("seq", subscription_log_seq) or subscription_log_seq or 0)),
+        "text": str(entry.get("display_text") or entry.get("text") or "").strip(),
+        "level": str(entry.get("level", "info") or "info").strip().lower() or "info",
+        "signature": str(entry.get("signature", "") or "").strip(),
+    }
+
+
+def build_subscription_log_meta(logs: Any = None) -> Dict[str, Any]:
+    source = logs if isinstance(logs, list) else subscription_status.get("logs", [])
+    latest_seq = int(subscription_log_seq or 0)
+    if isinstance(source, list) and source:
+        latest_entry = source[-1] if isinstance(source[-1], dict) else {}
+        latest_seq = max(latest_seq, int(latest_entry.get("seq", 0) or 0))
+    return {
+        "latest_seq": latest_seq,
+        "total": latest_seq,
+        "recent_task_limit": SUBSCRIPTION_UI_RECENT_TASK_LOG_LIMIT,
+        "page_task_limit": SUBSCRIPTION_LOG_TASK_PAGE_LIMIT,
+        "latest": build_subscription_log_preview(source),
+    }
+
+
+def parse_int_param(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _read_subscription_event_payloads() -> List[Dict[str, Any]]:
+    payloads: List[Dict[str, Any]] = []
+    for line in read_log_lines(SUBSCRIPTION_EVENT_LOG_PATH):
+        parsed = safe_json_loads(line, {})
+        payloads.append(parsed if isinstance(parsed, dict) else {})
+    return payloads
+
+
+def build_subscription_log_entry_from_line(
+    line: str,
+    seq: int,
+    event_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = event_payload if isinstance(event_payload, dict) else {}
+    raw_text = str(payload.get("text") or "").strip()
+    if not raw_text:
+        raw_text = re.sub(r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+", "", str(line or ""), count=1).strip()
+    display_text = _build_subscription_log_display_text(raw_text, payload)
+    full_text = str(line or "").strip() or display_text
+    entry = {
+        "seq": max(0, int(seq or 0)),
+        "text": full_text,
+        "display_text": display_text,
+        "raw_text": raw_text,
+        "level": str(payload.get("level") or infer_log_level_from_text(line)).strip().lower() or "info",
+        "signature": hashlib.sha1(str(line or "").encode("utf-8")).hexdigest()[:12],
+    }
+    if payload:
+        entry["event"] = {
+            key: value
+            for key, value in payload.items()
+            if key != "text"
+        }
+    return entry
+
+
+def build_subscription_log_page_payload(
+    *,
+    after: int = 0,
+    before: int = 0,
+    limit: int = SUBSCRIPTION_LOG_TASK_PAGE_LIMIT,
+) -> Dict[str, Any]:
+    normalized_limit = max(1, min(20, int(limit or SUBSCRIPTION_LOG_TASK_PAGE_LIMIT)))
+    normalized_after = max(0, int(after or 0))
+    normalized_before = max(0, int(before or 0))
+    lines = read_log_lines(SUBSCRIPTION_LOG_PATH)
+    total = len(lines)
+    latest_seq = max(total, int(subscription_log_seq or 0))
+    base_seq = max(0, latest_seq - total)
+    event_payloads = _read_subscription_event_payloads()
+    event_start_index = max(0, len(event_payloads) - total)
+
+    entries = []
+    for index, line in enumerate(lines):
+        event_index = event_start_index + index
+        event_payload = event_payloads[event_index] if 0 <= event_index < len(event_payloads) else {}
+        event_text = str(event_payload.get("text") or "").strip() if isinstance(event_payload, dict) else ""
+        if event_text and event_text not in str(line or ""):
+            event_payload = {}
+        entries.append(build_subscription_log_entry_from_line(line, base_seq + index + 1, event_payload))
+
+    blocks = _build_subscription_log_blocks(entries)
+    if normalized_after > 0:
+        after_entries = [
+            entry
+            for entry in entries
+            if int(entry.get("seq", 0) or 0) > normalized_after
+        ]
+        eligible_blocks = _build_subscription_log_blocks(after_entries)
+        selected_blocks, _, selected_end = _head_subscription_log_blocks_by_task_count(eligible_blocks, normalized_limit)
+        has_more_before = bool(selected_blocks) and int(selected_blocks[0].get("start_seq", 0) or 0) > 1
+        has_more_after = selected_end < len(eligible_blocks)
+    elif normalized_before > 0:
+        eligible_blocks = [
+            block
+            for block in blocks
+            if int(block.get("end_seq", 0) or 0) < normalized_before
+        ]
+        selected_blocks, selected_start, _ = _tail_subscription_log_blocks_by_task_count(eligible_blocks, normalized_limit)
+        has_more_before = selected_start > 0
+        has_more_after = bool(selected_blocks) and int(selected_blocks[-1].get("end_seq", 0) or 0) < latest_seq
+    else:
+        selected_blocks, selected_start, _ = _tail_subscription_log_blocks_by_task_count(blocks, normalized_limit)
+        has_more_before = selected_start > 0
+        has_more_after = False
+
+    page_entries = _flatten_subscription_log_blocks(selected_blocks)
+    return {
+        "ok": True,
+        "logs": page_entries,
+        "total": total,
+        "latest_seq": latest_seq,
+        "oldest_seq": page_entries[0]["seq"] if page_entries else 0,
+        "newest_seq": page_entries[-1]["seq"] if page_entries else 0,
+        "has_more_before": has_more_before,
+        "has_more_after": has_more_after,
+        "page_task_limit": normalized_limit,
+        "task_block_count": sum(1 for block in selected_blocks if bool(block.get("task"))),
+    }
+
+
+async def clear_subscription_log_history() -> None:
+    global subscription_log_seq
+    clear_text = f"{format_log_time(True)} 订阅日志已清空"
+    subscription_log_seq = 1
+    subscription_status["logs"] = [
+        {
+            "seq": 1,
+            "text": clear_text,
+            "display_text": clear_text,
+            "raw_text": "订阅日志已清空",
+            "level": "info",
+            "signature": hashlib.sha1(clear_text.encode("utf-8")).hexdigest()[:12],
+        }
+    ]
+    await asyncio.to_thread(clear_log_file, SUBSCRIPTION_LOG_PATH, clear_text)
+    await asyncio.to_thread(
+        clear_log_file,
+        SUBSCRIPTION_EVENT_LOG_PATH,
+        safe_json_dumps(
+            {
+                "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "level": "info",
+                "event": "subscription.log",
+                "stage": "runtime",
+                "reason_code": "",
+                "text": "订阅日志已清空",
+            }
+        ),
+    )
+    schedule_ui_state_push(0)
+
+
 def build_main_status_payload(log_limit: int = UI_STATUS_LOG_TAIL_LIMIT) -> Dict[str, Any]:
     return {
         "running": bool(task_status["running"]),
@@ -3725,6 +4315,7 @@ def build_subscription_status_payload(
     cfg: Optional[Dict[str, Any]] = None,
     log_limit: int = UI_STATUS_LOG_TAIL_LIMIT,
     compact: bool = False,
+    include_logs: bool = True,
 ) -> Dict[str, Any]:
     cfg = cfg or get_config()
     logs = subscription_status.get("logs", [])
@@ -3733,11 +4324,13 @@ def build_subscription_status_payload(
         "running": bool(subscription_status["running"]),
         "current_task": str(subscription_status.get("current_task", "")),
         "queued": clone_jsonable(subscription_status.get("queued", [])),
-        "logs": _tail_jsonable_logs(logs, tail_limit),
-        "log_total": len(logs) if isinstance(logs, list) else 0,
+        "log_total": int(subscription_log_seq or 0),
         "log_tail_limit": max(0, int(tail_limit or 0)),
+        "log_meta": build_subscription_log_meta(logs),
         "summary": clone_jsonable(subscription_status.get("summary", {})),
     }
+    if include_logs:
+        payload["logs"] = _tail_subscription_ui_logs(logs, SUBSCRIPTION_UI_RECENT_TASK_LOG_LIMIT)
     if not compact:
         payload["tasks"] = clone_jsonable(list_subscription_task_runtime(cfg))
         payload["next_runs"] = clone_jsonable(subscription_next_run)
@@ -3798,7 +4391,7 @@ def build_ui_state_payload(
     full = {
         "main": build_main_status_payload(log_limit=log_limit),
         "monitor": build_monitor_status_payload(active_cfg, log_limit=log_limit),
-        "subscription": build_subscription_status_payload(active_cfg, log_limit=log_limit),
+        "subscription": build_subscription_status_payload(active_cfg, log_limit=log_limit, include_logs=False),
         "sign115": build_sign115_status_payload(active_cfg),
         "cookie_health": build_cookie_health_payload(active_cfg),
         "resource_channel_sync": build_resource_channel_sync_payload(),
@@ -4553,6 +5146,7 @@ async def write_subscription_log(text: str, level: str = "info", compact: Option
     resolved_level = str(level or infer_log_level_from_text(text)).strip().lower() or "info"
     timestamp = format_log_time(True)
     line = f"{timestamp} {text}"
+    seq = _next_subscription_log_seq()
     context = subscription_log_context_var.get() or {}
     event = _infer_subscription_log_event(text)
     stage = _infer_subscription_log_stage(text)
@@ -4577,8 +5171,10 @@ async def write_subscription_log(text: str, level: str = "info", compact: Option
         if key != "text"
     }
     ui_log_entry = {
+        "seq": seq,
         "text": display_text,
         "display_text": display_text,
+        "raw_text": event_payload["text"],
         "level": resolved_level,
         "event": ui_event_payload,
         "signature": hashlib.sha1(line.encode("utf-8")).hexdigest()[:12],
@@ -4594,6 +5190,7 @@ async def write_subscription_log(text: str, level: str = "info", compact: Option
         _append_status_log_entry(
             subscription_status["logs"],
             {
+                "seq": _next_subscription_log_seq(),
                 "text": "日志写盘失败",
                 "level": "warn",
                 "signature": hashlib.sha1(fallback_line.encode("utf-8")).hexdigest()[:12],
