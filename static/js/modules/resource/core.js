@@ -1,3 +1,14 @@
+        const resourcePosterFailedProxyUrls = new Set();
+
+        function markResourcePosterLoadFailed(img) {
+            const proxyUrl = String(img?.dataset?.proxyUrl || img?.getAttribute('src') || '').trim();
+            if (proxyUrl) resourcePosterFailedProxyUrls.add(proxyUrl);
+            img?.classList?.add('hidden');
+            img?.nextElementSibling?.classList?.remove('hidden');
+        }
+
+        window.markResourcePosterLoadFailed = markResourcePosterLoadFailed;
+
         function getResourceStatusLabel(status) {
             const normalized = String(status || 'new').trim().toLowerCase();
             const map = {
@@ -1357,9 +1368,12 @@
                 return `<div class="resource-poster resource-placeholder">${sourceLabel}</div>`;
             }
             const proxyUrl = `/resource/image?url=${encodeURIComponent(coverUrl)}`;
+            if (resourcePosterFailedProxyUrls.has(proxyUrl)) {
+                return `<div class="resource-poster resource-placeholder">${sourceLabel}</div>`;
+            }
             return `
                 <div class="relative">
-                    <img src="${proxyUrl}" alt="${title}" class="resource-poster" loading="lazy" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')">
+                    <img src="${escapeHtml(proxyUrl)}" data-proxy-url="${escapeHtml(proxyUrl)}" alt="${title}" class="resource-poster" loading="lazy" onerror="markResourcePosterLoadFailed(this)">
                     <div class="resource-poster resource-placeholder hidden">${sourceLabel}</div>
                 </div>
             `;

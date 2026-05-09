@@ -3,7 +3,9 @@ import functools
 import os
 import threading
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -28,6 +30,31 @@ RESOURCE_QUARK_SHARE_FAST_DEADLINE_SECONDS = max(
 RESOURCE_BROWSE_WORKERS = max(2, min(8, int(os.environ.get("RESOURCE_BROWSE_WORKERS", 4) or 4)))
 RESOURCE_QUARK_SHARE_WORKERS = max(2, min(8, int(os.environ.get("RESOURCE_QUARK_SHARE_WORKERS", 4) or 4)))
 RESOURCE_115_SHARE_WORKERS = max(2, min(8, int(os.environ.get("RESOURCE_115_SHARE_WORKERS", 3) or 3)))
+RESOURCE_IMAGE_PROXY_TIMEOUT_SECONDS = max(
+    2.0,
+    min(15.0, float(os.environ.get("RESOURCE_IMAGE_PROXY_TIMEOUT_SECONDS", 6) or 6)),
+)
+RESOURCE_IMAGE_PROXY_WORKERS = max(1, min(8, int(os.environ.get("RESOURCE_IMAGE_PROXY_WORKERS", 3) or 3)))
+RESOURCE_IMAGE_PROXY_SUCCESS_TTL_SECONDS = max(
+    60,
+    min(86400, int(os.environ.get("RESOURCE_IMAGE_PROXY_SUCCESS_TTL_SECONDS", 86400) or 86400)),
+)
+RESOURCE_IMAGE_PROXY_FAILURE_TTL_SECONDS = max(
+    30,
+    min(3600, int(os.environ.get("RESOURCE_IMAGE_PROXY_FAILURE_TTL_SECONDS", 600) or 600)),
+)
+RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES = max(
+    32,
+    min(2048, int(os.environ.get("RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES", 512) or 512)),
+)
+RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES = max(
+    0,
+    min(128 * 1024 * 1024, int(os.environ.get("RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES", 32 * 1024 * 1024) or 0)),
+)
+RESOURCE_IMAGE_PROXY_MAX_BODY_BYTES = max(
+    64 * 1024,
+    min(10 * 1024 * 1024, int(os.environ.get("RESOURCE_IMAGE_PROXY_MAX_BODY_BYTES", 2 * 1024 * 1024) or 0)),
+)
 resource_browse_executor = ThreadPoolExecutor(
     max_workers=RESOURCE_BROWSE_WORKERS,
     thread_name_prefix="resource-browse",
@@ -40,6 +67,13 @@ resource_115_share_executor = ThreadPoolExecutor(
     max_workers=RESOURCE_115_SHARE_WORKERS,
     thread_name_prefix="resource-115-share",
 )
+resource_image_executor = ThreadPoolExecutor(
+    max_workers=RESOURCE_IMAGE_PROXY_WORKERS,
+    thread_name_prefix="resource-image",
+)
+resource_image_semaphore = asyncio.Semaphore(RESOURCE_IMAGE_PROXY_WORKERS)
+resource_image_cache_lock = threading.Lock()
+resource_image_cache: Dict[str, Dict[str, Any]] = {}
 resource_channel_sync_submit_lock = threading.Lock()
 resource_channel_sync_submitted = False
 
@@ -1156,11 +1190,119 @@ async def probe_quark_connectivity_endpoint(request: Request) -> Dict[str, Any]:
     return {"ok": True, **result}
 
 
+def _normalize_resource_image_url(image_url: str) -> str:
+    parsed = urllib.parse.urlsplit(str(image_url or "").strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return urllib.parse.urlunsplit(parsed)
+
+
+def _get_cached_resource_image(image_url: str) -> Optional[Dict[str, Any]]:
+    now_ts = time.monotonic()
+    with resource_image_cache_lock:
+        cached = resource_image_cache.get(image_url)
+        if not cached:
+            return None
+        if float(cached.get("expires_at", 0) or 0) <= now_ts:
+            resource_image_cache.pop(image_url, None)
+            return None
+        return dict(cached)
+
+
+def _store_cached_resource_image(image_url: str, entry: Dict[str, Any]) -> None:
+    if not image_url:
+        return
+    with resource_image_cache_lock:
+        resource_image_cache[image_url] = entry
+        if len(resource_image_cache) <= RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES:
+            total_bytes = sum(len(item.get("body", b"") or b"") for item in resource_image_cache.values())
+            if not RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES or total_bytes <= RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES:
+                return
+        ordered_items = sorted(
+            resource_image_cache.items(),
+            key=lambda item: float(item[1].get("cached_at", 0) or 0),
+        )
+        while len(resource_image_cache) > RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES and ordered_items:
+            oldest_url, _ = ordered_items.pop(0)
+            if oldest_url != image_url:
+                resource_image_cache.pop(oldest_url, None)
+        if RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES:
+            total_bytes = sum(len(item.get("body", b"") or b"") for item in resource_image_cache.values())
+            while total_bytes > RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES and ordered_items:
+                oldest_url, _ = ordered_items.pop(0)
+                if oldest_url == image_url:
+                    continue
+                removed = resource_image_cache.pop(oldest_url, None)
+                total_bytes -= len(removed.get("body", b"") or b"") if isinstance(removed, dict) else 0
+
+
+def _build_resource_image_response(cached: Dict[str, Any], *, cache_state: str) -> Response:
+    headers = {
+        "Cache-Control": f"public, max-age={RESOURCE_IMAGE_PROXY_SUCCESS_TTL_SECONDS if cached.get('ok') else 300}",
+        "X-Resource-Image-Cache": cache_state,
+    }
+    if not cached.get("ok"):
+        return Response(status_code=int(cached.get("status", 404) or 404), headers=headers)
+    return Response(
+        content=cached.get("body", b"") or b"",
+        media_type=str(cached.get("content_type", "") or "application/octet-stream"),
+        headers=headers,
+    )
+
+
+def _fetch_resource_image(image_url: str, headers: Dict[str, str], proxy_url: str) -> Dict[str, Any]:
+    now_ts = time.monotonic()
+    deadline_ts = now_ts + RESOURCE_IMAGE_PROXY_TIMEOUT_SECONDS
+    attempts = []
+    if proxy_url:
+        attempts.append(proxy_url)
+    attempts.append("")
+    for current_proxy in attempts:
+        remaining = deadline_ts - time.monotonic()
+        if remaining <= 0.25:
+            break
+        try:
+            body, content_type = http_request_binary(
+                image_url,
+                remaining,
+                headers,
+                current_proxy,
+            )
+            normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+            if (
+                not body
+                or normalized_content_type.startswith("text/html")
+                or len(body) > RESOURCE_IMAGE_PROXY_MAX_BODY_BYTES
+            ):
+                continue
+            return {
+                "ok": True,
+                "status": 200,
+                "body": body,
+                "content_type": normalized_content_type or "application/octet-stream",
+                "cached_at": now_ts,
+                "expires_at": time.monotonic() + RESOURCE_IMAGE_PROXY_SUCCESS_TTL_SECONDS,
+            }
+        except Exception:
+            continue
+    return {
+        "ok": False,
+        "status": 404,
+        "body": b"",
+        "content_type": "",
+        "cached_at": now_ts,
+        "expires_at": time.monotonic() + RESOURCE_IMAGE_PROXY_FAILURE_TTL_SECONDS,
+    }
+
+
 @router.get("/resource/image")
 async def proxy_resource_image(request: Request) -> Response:
-    image_url = str(request.query_params.get("url", "") or "").strip()
+    image_url = _normalize_resource_image_url(str(request.query_params.get("url", "") or "").strip())
     if not image_url:
         return Response(status_code=400)
+    cached = _get_cached_resource_image(image_url)
+    if cached:
+        return _build_resource_image_response(cached, cache_state="hit")
     cfg = get_config()
     headers = {
         "User-Agent": "Mozilla/5.0 115-media-hub",
@@ -1168,26 +1310,18 @@ async def proxy_resource_image(request: Request) -> Response:
         "Referer": "https://t.me/",
         "Origin": "https://t.me",
     }
-    attempts: List[str] = []
     proxy_url = build_tg_proxy_url(cfg)
-    if proxy_url:
-        attempts.append(proxy_url)
-    attempts.append("")
-    for current_proxy in attempts:
-        try:
-            body, content_type = await asyncio.to_thread(
-                http_request_binary,
-                image_url,
-                45,
-                headers,
-                current_proxy,
-            )
-            if not body or str(content_type or "").startswith("text/html"):
-                continue
-            return Response(content=body, media_type=content_type, headers={"Cache-Control": "public, max-age=3600"})
-        except Exception:
-            continue
-    return Response(status_code=404)
+    async with resource_image_semaphore:
+        cached = _get_cached_resource_image(image_url)
+        if cached:
+            return _build_resource_image_response(cached, cache_state="hit")
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            resource_image_executor,
+            functools.partial(_fetch_resource_image, image_url, headers, proxy_url),
+        )
+        _store_cached_resource_image(image_url, result)
+        return _build_resource_image_response(result, cache_state="miss")
 
 
 @router.post("/resource/jobs/refresh")

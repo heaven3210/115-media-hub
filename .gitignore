@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .venv/
+node_modules/
 
 # 忽略数据
 strm/
@@ -34,4 +35,3 @@ preview-runtime/
 AGENTS.md
 CLAUDE.md
 doc/
-
