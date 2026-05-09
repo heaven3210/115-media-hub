@@ -11,6 +11,7 @@ from ..services.scraper import (
     build_scraper_rename_plan,
     check_scraper_folder_rename_warning,
     clear_scraper_jobs,
+    copy_scraper_entries,
     create_scraper_folder,
     create_scraper_job_from_plan,
     delete_scraper_entries,
@@ -103,6 +104,22 @@ async def move_scraper_entries_endpoint(provider: str, request: Request) -> Dict
         return JSONResponse(status_code=400, content={"ok": False, "msg": "目标目录不能为空"})
     try:
         return await asyncio.to_thread(move_scraper_entries, provider, entry_ids, target_cid, source_cid)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/copy")
+async def copy_scraper_entries_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    entry_ids = data.get("entry_ids", [])
+    target_cid = str(data.get("target_cid", "") or "").strip()
+    source_cid = str(data.get("source_cid", "") or "").strip()
+    if not isinstance(entry_ids, list) or not entry_ids:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "请选择要复制的条目"})
+    if not target_cid:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "目标目录不能为空"})
+    try:
+        return await asyncio.to_thread(copy_scraper_entries, provider, entry_ids, target_cid, source_cid)
     except Exception as exc:
         return _error_response(exc)
 

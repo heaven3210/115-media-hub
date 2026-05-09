@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..core import *  # noqa: F401,F403
 from ..providers.pan115 import (
+    copy_115_entries,
     create_115_folder,
     delete_115_entries,
     invalidate_115_entries_cache,
@@ -13,6 +14,7 @@ from ..providers.pan115 import (
     rename_115_entry,
 )
 from ..providers.quark import (
+    copy_quark_entries,
     create_quark_folder,
     delete_quark_entries,
     list_quark_entries_payload,
@@ -158,6 +160,7 @@ def build_scraper_providers_payload(cfg: Optional[Dict[str, Any]] = None) -> Dic
                     "browse": True,
                     "create_folder": True,
                     "rename": True,
+                    "copy": True,
                     "move": True,
                     "delete": True,
                     "scrape": True,
@@ -208,6 +211,12 @@ def _move_provider_entries(provider: str, cookie: str, entry_ids: List[str], tar
     if provider == "quark":
         return move_quark_entries(cookie, entry_ids, target_id, source_id)
     return move_115_entries(cookie, entry_ids, target_id, source_id)
+
+
+def _copy_provider_entries(provider: str, cookie: str, entry_ids: List[str], target_id: str, source_id: str = "") -> Dict[str, Any]:
+    if provider == "quark":
+        return copy_quark_entries(cookie, entry_ids, target_id, source_id)
+    return copy_115_entries(cookie, entry_ids, target_id, source_id)
 
 
 def _delete_provider_entries(provider: str, cookie: str, entry_ids: List[str], parent_id: str = "") -> Dict[str, Any]:
@@ -378,6 +387,14 @@ def move_scraper_entries(provider: str, entry_ids: List[str], target_cid: str, s
     cookie = _require_provider_cookie(normalized)
     result = _move_provider_entries(normalized, cookie, entry_ids, target_cid, source_cid)
     _invalidate_provider_parent(normalized, source_cid)
+    _invalidate_provider_parent(normalized, target_cid)
+    return {"ok": True, "provider": normalized, "result": result}
+
+
+def copy_scraper_entries(provider: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
+    normalized = normalize_scraper_provider(provider)
+    cookie = _require_provider_cookie(normalized)
+    result = _copy_provider_entries(normalized, cookie, entry_ids, target_cid, source_cid)
     _invalidate_provider_parent(normalized, target_cid)
     return {"ok": True, "provider": normalized, "result": result}
 
@@ -739,30 +756,90 @@ def _relative_parent_path_from_base(parent_path: str, base_path: str) -> str:
     return source
 
 
-def _format_tv_episode_code(task: Dict[str, Any], episodes: Set[int], default_season: int) -> Tuple[str, str]:
+def _resolve_scraper_tv_episode_info(task: Dict[str, Any], episodes: Set[int], default_season: int) -> Tuple[Dict[str, Any], str]:
     normalized_values = sorted({max(0, int(value or 0)) for value in episodes if max(0, int(value or 0)) > 0})
     if not normalized_values:
-        return "", "无法识别集数"
+        return {}, "无法识别集数"
     season_map = normalize_tmdb_season_episode_map(task.get("tmdb_season_episode_map", {}))
     if is_subscription_multi_season_mode(task) and season_map:
         mapped = [convert_subscription_absolute_to_season_episode(task, value) for value in normalized_values]
         mapped = [(season, episode) for season, episode in mapped if season > 0 and episode > 0]
         if not mapped:
-            return "", "连续编号无法映射到 TMDB 季集"
+            return {}, "连续编号无法映射到 TMDB 季集"
         seasons = {season for season, _ in mapped}
         if len(seasons) > 1:
-            return "", "单个文件跨季，暂不自动命名"
+            return {}, "单个文件跨季，暂不自动命名"
         season_no = next(iter(seasons))
         episode_values = sorted({episode for _, episode in mapped})
     else:
         season_no = max(1, int(default_season or task.get("season", 1) or 1))
         episode_values = normalized_values
+    return {"season": season_no, "episodes": episode_values}, ""
+
+
+def _scraper_episode_width_from_value(value: int) -> int:
+    return max(2, len(str(max(0, int(value or 0)))))
+
+
+def _scraper_tmdb_episode_total_for_season(task: Dict[str, Any], season_no: int) -> int:
+    target_season = max(1, int(season_no or 1))
+    season_map = normalize_tmdb_season_episode_map(task.get("tmdb_season_episode_map", {}))
+    if season_map:
+        return max(0, int(season_map.get(str(target_season), 0) or 0))
+    tmdb_total_seasons = max(0, int(task.get("tmdb_total_seasons", 0) or 0))
+    tmdb_total_episodes = max(0, int(task.get("tmdb_total_episodes", 0) or 0))
+    task_season = max(1, int(task.get("season", 1) or 1))
+    if tmdb_total_episodes > 0 and (tmdb_total_seasons <= 1 or target_season == task_season):
+        return tmdb_total_episodes
+    return 0
+
+
+def _build_scraper_episode_widths_by_season(
+    task: Dict[str, Any],
+    episode_infos: List[Dict[str, Any]],
+) -> Dict[int, int]:
+    season_max_episodes: Dict[int, int] = {}
+    for info in episode_infos:
+        season_no = max(1, int((info or {}).get("season", 1) or 1))
+        episodes = [
+            max(0, int(value or 0))
+            for value in ((info or {}).get("episodes", []) if isinstance((info or {}).get("episodes", []), list) else [])
+            if max(0, int(value or 0)) > 0
+        ]
+        file_max = max(episodes) if episodes else 0
+        tmdb_max = _scraper_tmdb_episode_total_for_season(task, season_no)
+        season_max_episodes[season_no] = max(season_max_episodes.get(season_no, 0), file_max, tmdb_max)
+    return {season_no: _scraper_episode_width_from_value(max_episode) for season_no, max_episode in season_max_episodes.items()}
+
+
+def _format_tv_episode_code(episode_info: Dict[str, Any], episode_width: int = 2) -> Tuple[str, str]:
+    season_no = max(1, int((episode_info or {}).get("season", 1) or 1))
+    episode_values = sorted(
+        {
+            max(0, int(value or 0))
+            for value in ((episode_info or {}).get("episodes", []) if isinstance((episode_info or {}).get("episodes", []), list) else [])
+            if max(0, int(value or 0)) > 0
+        }
+    )
+    if not episode_values:
+        return "", "无法识别集数"
+    width = max(2, int(episode_width or 2))
+
+    def _episode_label(value: int) -> str:
+        return f"E{max(0, int(value or 0)):0{width}d}"
+
     if len(episode_values) == 1:
-        return f"S{season_no:02d}E{episode_values[0]:02d}", ""
-    return f"S{season_no:02d}E{episode_values[0]:02d}-E{episode_values[-1]:02d}", ""
+        return f"S{season_no:02d}{_episode_label(episode_values[0])}", ""
+    return f"S{season_no:02d}{_episode_label(episode_values[0])}-{_episode_label(episode_values[-1])}", ""
 
 
-def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], options: Dict[str, Any]) -> Tuple[str, str]:
+def _build_scraper_target_path(
+    entry: Dict[str, Any],
+    tmdb: Dict[str, Any],
+    options: Dict[str, Any],
+    episode_info: Optional[Dict[str, Any]] = None,
+    episode_widths_by_season: Optional[Dict[int, int]] = None,
+) -> Tuple[str, str]:
     media_type = normalize_tmdb_media_type(tmdb.get("tmdb_media_type") or tmdb.get("media_type"), "movie")
     organize_into_media_folder = bool(options.get("organize_into_media_folder", True))
     use_season_subfolder = bool(options.get("use_season_subfolder", True))
@@ -777,15 +854,32 @@ def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], opti
     _, file_title, folder_title = _build_scraper_media_titles(tmdb, options, str(entry.get("name", "") or ""))
     if media_type == "tv":
         task = _build_task_from_tmdb(tmdb, options)
-        episodes = _extract_task_episodes_from_file_entry(
-            task,
-            str(entry.get("path") or entry.get("name") or ""),
-            parent_path=normalize_relative_path(str(entry.get("parent_path", "") or "")),
+        resolved_episode_info = episode_info if isinstance(episode_info, dict) else {}
+        if not resolved_episode_info:
+            episodes = _extract_task_episodes_from_file_entry(
+                task,
+                str(entry.get("path") or entry.get("name") or ""),
+                parent_path=normalize_relative_path(str(entry.get("parent_path", "") or "")),
+            )
+            resolved_episode_info, issue = _resolve_scraper_tv_episode_info(
+                task,
+                episodes,
+                max(1, parse_int(options.get("season") or task.get("season") or 1, 1)),
+            )
+            if issue:
+                return "", issue
+        season_no = max(1, int(resolved_episode_info.get("season") or options.get("season") or 1))
+        episode_width = (
+            episode_widths_by_season.get(season_no, 2)
+            if isinstance(episode_widths_by_season, dict)
+            else 2
         )
-        episode_code, issue = _format_tv_episode_code(task, episodes, max(1, parse_int(options.get("season") or task.get("season") or 1, 1)))
+        if episode_width <= 2 and not (isinstance(episode_widths_by_season, dict) and season_no in episode_widths_by_season):
+            fallback_widths = _build_scraper_episode_widths_by_season(task, [resolved_episode_info])
+            episode_width = fallback_widths.get(season_no, episode_width)
+        episode_code, issue = _format_tv_episode_code(resolved_episode_info, episode_width)
         if issue:
             return "", issue
-        season_no = max(1, int(episode_code[1:3] or options.get("season") or 1))
         file_name = sanitize_scraper_name(f"{file_title} - {episode_code}{tag_suffix}") + ext
         if preserve_source_parent_path:
             return normalize_relative_path(join_relative_path(source_relative_parent_path, file_name)), ""
@@ -802,17 +896,51 @@ def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], opti
     return normalize_relative_path(join_relative_path(folder_title, file_name)), ""
 
 
-def _walk_existing_folder(provider: str, cookie: str, base_cid: str, folder_path: str) -> Tuple[str, bool]:
+def _get_scraper_cached_entries_payload(
+    provider: str,
+    cookie: str,
+    cid: str,
+    folders_only: bool,
+    cache: Optional[Dict[Tuple[str, bool], Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    target_id = str(cid or "0").strip() or "0"
+    cache_key = (target_id, bool(folders_only))
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+    payload = _list_provider_entries_payload(provider, cookie, target_id, folders_only=folders_only)
+    if cache is not None:
+        cache[cache_key] = payload
+    return payload
+
+
+def _walk_existing_folder(
+    provider: str,
+    cookie: str,
+    base_cid: str,
+    folder_path: str,
+    *,
+    entries_cache: Optional[Dict[Tuple[str, bool], Dict[str, Any]]] = None,
+    path_cache: Optional[Dict[Tuple[str, str], Tuple[str, bool]]] = None,
+) -> Tuple[str, bool]:
     current = str(base_cid or "0").strip() or "0"
+    normalized_folder_path = normalize_relative_path(folder_path)
+    path_cache_key = (current, normalized_folder_path)
+    if path_cache is not None and path_cache_key in path_cache:
+        return path_cache[path_cache_key]
     parts = [part for part in normalize_relative_path(folder_path).split("/") if part]
     for part in parts:
-        payload = _list_provider_entries_payload(provider, cookie, current, folders_only=True)
+        payload = _get_scraper_cached_entries_payload(provider, cookie, current, True, entries_cache)
         entries = payload.get("entries", []) if isinstance(payload, dict) and isinstance(payload.get("entries"), list) else []
         matched = next((item for item in entries if item.get("is_dir") and str(item.get("name", "") or "").strip() == part), None)
         if not matched:
+            if path_cache is not None:
+                path_cache[path_cache_key] = ("", False)
             return "", False
         current = str(matched.get("id") or matched.get("cid") or "").strip() or "0"
-    return current, True
+    result = (current, True)
+    if path_cache is not None:
+        path_cache[path_cache_key] = result
+    return result
 
 
 def _ensure_folder_from_base(provider: str, cookie: str, base_cid: str, folder_path: str) -> str:
@@ -829,10 +957,18 @@ def _ensure_folder_from_base(provider: str, cookie: str, base_cid: str, folder_p
     return current
 
 
-def _target_name_exists(provider: str, cookie: str, parent_id: str, target_name: str, same_entry_id: str = "") -> bool:
+def _target_name_exists(
+    provider: str,
+    cookie: str,
+    parent_id: str,
+    target_name: str,
+    same_entry_id: str = "",
+    *,
+    entries_cache: Optional[Dict[Tuple[str, bool], Dict[str, Any]]] = None,
+) -> bool:
     if not parent_id:
         return False
-    payload = _list_provider_entries_payload(provider, cookie, parent_id, folders_only=False)
+    payload = _get_scraper_cached_entries_payload(provider, cookie, parent_id, False, entries_cache)
     entries = payload.get("entries", []) if isinstance(payload, dict) and isinstance(payload.get("entries"), list) else []
     for item in entries:
         if str(item.get("name", "") or "").strip() != target_name:
@@ -977,11 +1113,31 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         plan_options["use_season_subfolder"] = False
         plan_options["rename_selected_folders"] = False
     expanded_files, scan_issues = _expand_selected_scraper_entries(provider, cookie, selected)
+    media_type = normalize_tmdb_media_type(tmdb.get("tmdb_media_type") or tmdb.get("media_type"), "movie")
+    task = _build_task_from_tmdb(tmdb, plan_options) if media_type == "tv" else {}
+    default_season = max(1, parse_int(plan_options.get("season") or task.get("season") or 1, 1)) if media_type == "tv" else 1
+    file_episode_infos: List[Dict[str, Any]] = []
+    episode_widths_by_season: Dict[int, int] = {}
+    if media_type == "tv":
+        for entry in expanded_files:
+            episodes = _extract_task_episodes_from_file_entry(
+                task,
+                str(entry.get("path") or entry.get("name") or ""),
+                parent_path=normalize_relative_path(str(entry.get("parent_path", "") or "")),
+            )
+            episode_info, _ = _resolve_scraper_tv_episode_info(task, episodes, default_season)
+            file_episode_infos.append(episode_info)
+        episode_widths_by_season = _build_scraper_episode_widths_by_season(
+            task,
+            [info for info in file_episode_infos if info],
+        )
     actions: List[Dict[str, Any]] = []
     issues: List[str] = list(scan_issues)
     warnings: List[str] = []
     target_paths: Set[str] = set()
     target_folder_names: Set[str] = set()
+    preview_entries_cache: Dict[Tuple[str, bool], Dict[str, Any]] = {}
+    preview_folder_path_cache: Dict[Tuple[str, str], Tuple[str, bool]] = {}
     action_index = 1
     if folder_mode and bool(plan_options.get("rename_selected_folders", True)):
         _, _, target_folder_name = _build_scraper_media_titles(tmdb, plan_options, "")
@@ -1002,7 +1158,14 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
             if new_name in target_folder_names:
                 action_issue = "本批次内目标文件夹重复"
             target_folder_names.add(new_name)
-            if _target_name_exists(provider, cookie, old_parent_id, new_name, same_entry_id=str(entry.get("id", "") or "")):
+            if _target_name_exists(
+                provider,
+                cookie,
+                old_parent_id,
+                new_name,
+                same_entry_id=str(entry.get("id", "") or ""),
+                entries_cache=preview_entries_cache,
+            ):
                 action_issue = "当前目录中已有同名文件夹"
             action = {
                 "action_index": action_index,
@@ -1028,8 +1191,15 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
                 issues.append(f"{old_name or '--'}：{action_issue}")
             actions.append(action)
             action_index += 1
-    for entry in expanded_files:
-        target_path, issue = _build_scraper_target_path(entry, tmdb, plan_options)
+    for file_index, entry in enumerate(expanded_files):
+        episode_info = file_episode_infos[file_index] if file_index < len(file_episode_infos) else None
+        target_path, issue = _build_scraper_target_path(
+            entry,
+            tmdb,
+            plan_options,
+            episode_info=episode_info,
+            episode_widths_by_season=episode_widths_by_season,
+        )
         old_parent_id = str(entry.get("parent_id", "") or base_cid).strip() or "0"
         old_path = normalize_relative_path(str(entry.get("path", "") or entry.get("name", "")))
         action_issue = issue
@@ -1040,8 +1210,22 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
             if target_path in target_paths:
                 action_issue = action_issue or "本批次内目标路径重复"
             target_paths.add(target_path)
-            existing_parent_id, exists = _walk_existing_folder(provider, cookie, base_cid, target_parent_path)
-            if exists and _target_name_exists(provider, cookie, existing_parent_id, new_name, same_entry_id=str(entry.get("id", "") or "")):
+            existing_parent_id, exists = _walk_existing_folder(
+                provider,
+                cookie,
+                base_cid,
+                target_parent_path,
+                entries_cache=preview_entries_cache,
+                path_cache=preview_folder_path_cache,
+            )
+            if exists and _target_name_exists(
+                provider,
+                cookie,
+                existing_parent_id,
+                new_name,
+                same_entry_id=str(entry.get("id", "") or ""),
+                entries_cache=preview_entries_cache,
+            ):
                 action_issue = action_issue or "目标目录中已有同名文件"
         action = {
             "action_index": action_index,

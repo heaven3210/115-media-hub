@@ -9964,7 +9964,7 @@
         .scraper-shell {
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 0.85rem;
         }
 
         .scraper-topbar,
@@ -9991,6 +9991,7 @@
             font-size: 0.72rem;
             font-weight: 850;
             letter-spacing: 0.04em;
+            line-height: 1;
             text-transform: uppercase;
         }
 
@@ -10003,37 +10004,45 @@
         }
 
         .scraper-subtitle {
-            margin-top: 0.35rem;
+            margin-top: 0;
             color: #94a3b8;
             font-size: 0.86rem;
+            line-height: 1.25;
         }
 
         .scraper-provider-tabs {
             display: flex;
-            align-items: stretch;
-            gap: 0.5rem;
-            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.42rem;
+            flex-wrap: nowrap;
             justify-content: flex-end;
         }
 
         .scraper-provider-tab {
-            min-width: 6rem;
-            padding: 0.62rem 0.75rem;
+            min-width: 5.1rem;
+            height: var(--scraper-toolbar-control-height, 42px);
+            min-height: var(--scraper-toolbar-control-height, 42px);
+            padding: 0.38rem 0.58rem;
             border-radius: 8px;
             border: 1px solid rgba(100, 116, 139, 0.62);
             background: rgba(15, 23, 42, 0.82);
             color: #e2e8f0;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
             align-items: flex-start;
-            gap: 0.2rem;
+            justify-content: center;
+            gap: 0.08rem;
+            font-size: 0.88rem;
             font-weight: 820;
+            line-height: 1.05;
         }
 
         .scraper-provider-tab small {
             color: #94a3b8;
-            font-size: 0.7rem;
+            font-size: 0.66rem;
             font-weight: 720;
+            line-height: 1;
         }
 
         .scraper-provider-tab.is-active {
@@ -10052,6 +10061,73 @@
         }
 
         .scraper-panel { padding: 1rem; }
+
+        .scraper-browser-panel {
+            --scraper-browser-height: min(72vh, 760px);
+            --scraper-toolbar-control-height: 42px;
+            height: var(--scraper-browser-height);
+            min-height: 420px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .scraper-browser-toolbar {
+            flex: 0 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.62rem;
+        }
+
+        .scraper-browser-heading {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 0.78rem;
+            flex-wrap: wrap;
+        }
+
+        .scraper-browser-heading > div:first-child {
+            flex: 0 0 auto;
+        }
+
+        .scraper-browser-heading .scraper-subtitle {
+            flex: 1 1 18rem;
+            min-width: 12rem;
+        }
+
+        .scraper-browser-controls {
+            flex: 0 0 auto;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 0.42rem;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            max-width: 100%;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        .scraper-browser-controls::-webkit-scrollbar {
+            display: none;
+        }
+
+        .scraper-browser-controls .scraper-provider-tabs {
+            flex: 0 0 auto;
+        }
+
+        .scraper-browser-controls .scraper-icon-btn {
+            width: var(--scraper-toolbar-control-height, 42px);
+            height: var(--scraper-toolbar-control-height, 42px);
+            min-width: var(--scraper-toolbar-control-height, 42px);
+            min-height: var(--scraper-toolbar-control-height, 42px);
+            flex: 0 0 var(--scraper-toolbar-control-height, 42px);
+        }
 
         .scraper-inspector-panel {
             position: fixed;
@@ -10228,6 +10304,7 @@
         }
 
         .scraper-breadcrumbs {
+            flex: 0 0 auto;
             min-height: 36px;
             display: flex;
             align-items: center;
@@ -10260,6 +10337,24 @@
             margin-bottom: 0.8rem;
         }
 
+        .scraper-browser-popovers {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .scraper-tool-popover {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 0.45rem;
+            border: 1px solid rgba(51, 65, 85, 0.8);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.78);
+            padding: 0.5rem;
+            margin-bottom: 0.62rem;
+        }
+
         .scraper-search-box,
         .scraper-create-folder,
         .scraper-manual-row {
@@ -10277,6 +10372,7 @@
 
         .scraper-selection-bar,
         .scraper-move-buffer {
+            flex: 0 0 auto;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -10302,6 +10398,13 @@
             font-size: 0.84rem;
         }
 
+        .scraper-selection-actions {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            max-width: 100%;
+            padding-bottom: 0.08rem;
+        }
+
         .scraper-binding-pill {
             max-width: min(48rem, 100%);
             border: 1px solid rgba(56, 189, 248, 0.42);
@@ -10322,6 +10425,10 @@
         }
 
         .scraper-entry-table {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
             border: 1px solid rgba(51, 65, 85, 0.85);
             border-radius: 8px;
             overflow: hidden;
@@ -10338,12 +10445,23 @@
         }
 
         .scraper-entry-header {
+            flex: 0 0 auto;
+            position: sticky;
+            top: 0;
+            z-index: 2;
             color: #94a3b8;
             font-size: 0.72rem;
             font-weight: 850;
             background: rgba(15, 23, 42, 0.88);
             border-bottom: 1px solid rgba(51, 65, 85, 0.86);
             text-transform: uppercase;
+        }
+
+        .scraper-entry-list {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
 
         .scraper-sort-button {
@@ -10905,6 +11023,7 @@
 
         @media (max-width: 760px) {
             .scraper-topbar,
+            .scraper-browser-toolbar,
             .scraper-selection-bar,
             .scraper-move-buffer,
             .scraper-candidate-row,
@@ -10922,24 +11041,131 @@
                 justify-content: flex-start;
             }
 
+            .scraper-browser-toolbar {
+                gap: 0.5rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .scraper-browser-controls {
+                justify-content: flex-start;
+                padding-bottom: 0.05rem;
+            }
+
             .scraper-browser-tools,
+            .scraper-tool-popover,
             .scraper-option-grid,
             .scraper-tag-grid {
                 grid-template-columns: 1fr;
             }
 
-            .scraper-entry-header { display: none; }
+            .scraper-browser-panel {
+                --scraper-toolbar-control-height: 40px;
+                min-height: 440px;
+            }
+
+            .scraper-browser-heading {
+                align-items: center;
+                flex-direction: row;
+                gap: 0.28rem 0.55rem;
+            }
+
+            .scraper-browser-heading > div:first-child {
+                display: flex;
+                align-items: baseline;
+                gap: 0.42rem;
+                flex-wrap: wrap;
+            }
+
+            .scraper-browser-heading .scraper-subtitle {
+                flex: 1 1 100%;
+                min-width: 0;
+                font-size: 0.8rem;
+            }
+
+            .scraper-browser-panel .scraper-panel-title {
+                font-size: 0.98rem;
+            }
+
+            .scraper-provider-tabs {
+                flex-wrap: nowrap;
+                overflow: visible;
+                width: auto;
+                justify-content: flex-start;
+            }
+
+            .scraper-provider-tab {
+                min-width: 4.7rem;
+                padding: 0.32rem 0.52rem;
+                font-size: 0.82rem;
+            }
+
+            .scraper-entry-table {
+                overflow-x: auto;
+                overflow-y: hidden;
+            }
+
+            .scraper-entry-header,
+            .scraper-entry-list,
+            .scraper-entry-row {
+                min-width: 620px;
+            }
+
+            .scraper-entry-header,
+            .scraper-entry-row {
+                grid-template-columns: minmax(0, 1fr) 116px 82px;
+                gap: 0.42rem;
+                padding: 0.44rem 0.55rem;
+            }
+
+            .scraper-entry-header {
+                display: grid;
+                font-size: 0.68rem;
+            }
+
+            .scraper-entry-row {
+                min-height: 46px;
+                font-size: 0.76rem;
+            }
+
+            .scraper-entry-row > span {
+                padding-left: 0;
+                white-space: nowrap;
+            }
+
+            .scraper-entry-name-cell {
+                gap: 0.42rem;
+            }
+
+            .scraper-entry-icon {
+                width: 24px;
+                height: 24px;
+                flex-basis: 24px;
+                border-radius: 7px;
+            }
+
+            .scraper-entry-icon svg {
+                width: 15px;
+                height: 15px;
+            }
+
+            .scraper-entry-link,
+            .scraper-entry-filename {
+                line-height: 1.26;
+            }
+
+            .scraper-entry-table.is-preview-mode {
+                overflow-x: hidden;
+            }
 
             .scraper-entry-table.is-preview-mode .scraper-entry-header {
                 display: none;
             }
 
-            .scraper-entry-row {
-                grid-template-columns: 1fr;
-                gap: 0.35rem;
+            .scraper-entry-table.is-preview-mode .scraper-entry-list,
+            .scraper-entry-table.is-preview-mode .scraper-preview-row {
+                min-width: 0;
             }
 
-            .scraper-entry-row > span { padding-left: 3.2rem; }
             .scraper-preview-row {
                 grid-template-columns: 1fr;
                 gap: 0.45rem;
@@ -10983,6 +11209,20 @@
             .scraper-topbar {
                 padding: 0.78rem;
             }
+
+            .scraper-browser-panel {
+                --scraper-toolbar-control-height: 38px;
+            }
+
+            .scraper-provider-tab {
+                min-width: 4.35rem;
+                padding-inline: 0.46rem;
+                font-size: 0.78rem;
+            }
+
+            .scraper-provider-tab small {
+                font-size: 0.62rem;
+            }
         }
 
         html.theme-day .scraper-page { color: #0f172a; }
@@ -11025,6 +11265,7 @@
 
         html.theme-day .scraper-provider-tab,
         html.theme-day .scraper-breadcrumbs,
+        html.theme-day .scraper-tool-popover,
         html.theme-day .scraper-selection-bar,
         html.theme-day .scraper-move-buffer,
         html.theme-day .scraper-entry-table,

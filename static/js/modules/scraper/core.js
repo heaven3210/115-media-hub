@@ -15,6 +15,8 @@ const state = {
     loading: false,
     navigationBusy: false,
     moveBuffer: null,
+    copyBuffer: null,
+    activeTool: '',
     identifyBusy: false,
     identifyResult: null,
     identifySelectionKey: '',
@@ -333,6 +335,37 @@ function syncScraperBackTopButton() {
     btn.classList.toggle('hidden', !shouldShow);
 }
 
+function syncScraperBrowserHeight() {
+    const page = $('page-scraper');
+    const panel = document.querySelector('#page-scraper .scraper-browser-panel');
+    if (!page || !panel || page.classList.contains('hidden')) return;
+    const rect = panel.getBoundingClientRect();
+    const reservedBottom = window.matchMedia('(max-width: 1023px)').matches ? 96 : 28;
+    const available = Math.max(380, Math.floor(window.innerHeight - Math.max(rect.top, 0) - reservedBottom));
+    panel.style.setProperty('--scraper-browser-height', `${available}px`);
+}
+
+function closeToolPopovers() {
+    state.activeTool = '';
+    $('scraper-search-popover')?.classList.add('hidden');
+    $('scraper-create-popover')?.classList.add('hidden');
+}
+
+function toggleToolPopover(tool) {
+    const normalized = String(tool || '').trim();
+    const nextTool = state.activeTool === normalized ? '' : normalized;
+    closeToolPopovers();
+    state.activeTool = nextTool;
+    if (nextTool === 'search') {
+        $('scraper-search-popover')?.classList.remove('hidden');
+        setTimeout(() => $('scraper-search-input')?.focus(), 20);
+    } else if (nextTool === 'create') {
+        $('scraper-create-popover')?.classList.remove('hidden');
+        setTimeout(() => $('scraper-new-folder-name')?.focus(), 20);
+    }
+    requestAnimationFrame(syncScraperBrowserHeight);
+}
+
 async function promptText({ title = '输入名称', message = '', defaultValue = '', confirmText = '确认' } = {}) {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -493,6 +526,7 @@ function renderSelection() {
     }
     const actionRules = {
         'select-range': !hasPlan && selectedInCurrent >= 2,
+        'prepare-copy': hasSelection,
         'prepare-move': hasSelection,
         'delete-selected': hasSelection,
         identify: hasSelection,
@@ -548,21 +582,25 @@ function syncBuildPlanControls() {
 function renderMoveBuffer() {
     const el = $('scraper-move-buffer');
     if (!el) return;
-    const buffer = state.moveBuffer;
+    const buffer = state.copyBuffer || state.moveBuffer;
+    const mode = state.copyBuffer ? 'copy' : 'move';
     if (!buffer || !Array.isArray(buffer.entries) || buffer.entries.length <= 0) {
         el.classList.add('hidden');
         el.innerHTML = '';
         return;
     }
+    const modeText = mode === 'copy' ? '复制' : '移动';
+    const actionName = mode === 'copy' ? 'copy-here' : 'move-here';
+    const clearName = mode === 'copy' ? 'clear-copy' : 'clear-move';
     el.classList.remove('hidden');
     el.innerHTML = `
         <div>
-            <strong>待移动 ${escapeHtml(String(buffer.entries.length))} 项</strong>
+            <strong>待${modeText} ${escapeHtml(String(buffer.entries.length))} 项</strong>
             <span>来源：${escapeHtml(buffer.source_path || '根目录')}</span>
         </div>
         <div class="scraper-move-actions">
-            <button type="button" class="scraper-compact-btn scraper-primary-soft" data-scraper-action="move-here">移动到当前目录</button>
-            <button type="button" class="scraper-compact-btn" data-scraper-action="clear-move">取消</button>
+            <button type="button" class="scraper-compact-btn scraper-primary-soft" data-scraper-action="${actionName}">${modeText}到当前目录</button>
+            <button type="button" class="scraper-compact-btn" data-scraper-action="${clearName}">取消</button>
         </div>
     `;
 }
@@ -1123,6 +1161,7 @@ async function loadEntries({ force = false, keepSearch = true } = {}) {
     } finally {
         state.loading = false;
         renderEntries();
+        requestAnimationFrame(syncScraperBrowserHeight);
     }
 }
 
@@ -1199,6 +1238,7 @@ async function createFolder() {
             name,
         });
         if (input) input.value = '';
+        closeToolPopovers();
         showToast('文件夹已创建', { tone: 'success', duration: 2200, placement: 'top-center' });
         await loadEntries({ force: true });
     } catch (error) {
@@ -1262,6 +1302,7 @@ function prepareMove() {
         showToast('请先选择要移动的条目', { tone: 'warn', duration: 2200, placement: 'top-center' });
         return;
     }
+    state.copyBuffer = null;
     state.moveBuffer = {
         provider: state.provider,
         source_cid: state.cid,
@@ -1271,6 +1312,24 @@ function prepareMove() {
     clearSelection();
     renderEntries();
     showToast('已记录待移动条目，请进入目标目录后执行移动', { tone: 'info', duration: 3000, placement: 'top-center' });
+}
+
+function prepareCopy() {
+    const selected = getEffectiveSelectedEntries();
+    if (!selected.length) {
+        showToast('请先选择要复制的条目', { tone: 'warn', duration: 2200, placement: 'top-center' });
+        return;
+    }
+    state.moveBuffer = null;
+    state.copyBuffer = {
+        provider: state.provider,
+        source_cid: state.cid,
+        source_path: currentParentPath() || '根目录',
+        entries: selected,
+    };
+    clearSelection();
+    renderEntries();
+    showToast('已记录待复制条目，请进入目标目录后执行复制', { tone: 'info', duration: 3000, placement: 'top-center' });
 }
 
 async function moveHere() {
@@ -1300,6 +1359,36 @@ async function moveHere() {
         await loadEntries({ force: true });
     } catch (error) {
         showToast(`移动失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3400, placement: 'top-center' });
+    }
+}
+
+async function copyHere() {
+    const buffer = state.copyBuffer;
+    if (!buffer || !buffer.entries?.length) return;
+    if (buffer.provider !== state.provider) {
+        showToast('待复制条目与当前网盘不一致', { tone: 'warn', duration: 2600, placement: 'top-center' });
+        return;
+    }
+    if (normalizeCid(buffer.source_cid) === normalizeCid(state.cid)) {
+        showToast('目标目录与来源目录相同', { tone: 'warn', duration: 2200, placement: 'top-center' });
+        return;
+    }
+    const ok = await showConfirm(`将 ${buffer.entries.length} 个条目复制到当前目录，确定继续吗？`, {
+        title: '确认复制',
+        confirmText: '复制',
+    });
+    if (!ok) return;
+    try {
+        await window.MediaHubApi.postJson(`/scraper/${encodeURIComponent(state.provider)}/copy`, {
+            entry_ids: buffer.entries.map(item => item.id),
+            source_cid: buffer.source_cid,
+            target_cid: state.cid,
+        });
+        state.copyBuffer = null;
+        showToast('复制已完成', { tone: 'success', duration: 2400, placement: 'top-center' });
+        await loadEntries({ force: true });
+    } catch (error) {
+        showToast(`复制失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3400, placement: 'top-center' });
     }
 }
 
@@ -1695,13 +1784,25 @@ function handleClick(event) {
     const action = String(actionButton.dataset.scraperAction || '').trim();
     if (action === 'refresh') void loadEntries({ force: true });
     if (action === 'back-top') scrollScraperToTop();
+    if (action === 'toggle-search') toggleToolPopover('search');
+    if (action === 'toggle-create-folder') toggleToolPopover('create');
+    if (action === 'close-tools') closeToolPopovers();
     if (action === 'search') {
         state.search = String($('scraper-search-input')?.value || '').trim();
+        closeToolPopovers();
         void loadEntries();
+    }
+    if (action === 'clear-search') {
+        state.search = '';
+        const input = $('scraper-search-input');
+        if (input) input.value = '';
+        closeToolPopovers();
+        void loadEntries({ keepSearch: false });
     }
     if (action === 'create-folder') void createFolder();
     if (action === 'select-range') selectRangeBetweenChecked();
     if (action === 'rename-selected') void renameSelected();
+    if (action === 'prepare-copy') prepareCopy();
     if (action === 'prepare-move') prepareMove();
     if (action === 'delete-selected') void deleteSelected();
     if (action === 'identify') void identifySelected();
@@ -1723,7 +1824,12 @@ function handleClick(event) {
     }
     if (action === 'execute-plan') void executePlan();
     if (action === 'refresh-jobs') void refreshJobs();
+    if (action === 'copy-here') void copyHere();
     if (action === 'move-here') void moveHere();
+    if (action === 'clear-copy') {
+        state.copyBuffer = null;
+        renderEntries();
+    }
     if (action === 'clear-move') {
         state.moveBuffer = null;
         renderEntries();
@@ -1776,8 +1882,11 @@ function handleChange(event) {
 function handleGlobalKeydown(event) {
     if (event.key !== 'Escape') return;
     const panel = $('scraper-identify-panel');
-    if (!panel || panel.classList.contains('hidden')) return;
-    closeIdentifyPanel();
+    if (panel && !panel.classList.contains('hidden')) {
+        closeIdentifyPanel();
+        return;
+    }
+    closeToolPopovers();
 }
 
 function bindEvents() {
@@ -1787,9 +1896,13 @@ function bindEvents() {
     root.addEventListener('click', handleClick);
     root.addEventListener('change', handleChange);
     window.addEventListener('scroll', syncScraperBackTopButton, { passive: true });
-    window.addEventListener('resize', syncScraperBackTopButton);
+    window.addEventListener('resize', () => {
+        syncScraperBackTopButton();
+        syncScraperBrowserHeight();
+    });
     document.addEventListener('keydown', handleGlobalKeydown);
     window.syncScraperBackTopButton = syncScraperBackTopButton;
+    window.syncScraperBrowserHeight = syncScraperBrowserHeight;
     $('scraper-search-input')?.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' || event.isComposing) return;
         state.search = String(event.target.value || '').trim();
@@ -1819,10 +1932,12 @@ async function refreshInitialData() {
 
 export async function ensureScraperManager({ firstVisit = false } = {}) {
     bindEvents();
+    requestAnimationFrame(syncScraperBrowserHeight);
     if (!state.initialized || firstVisit) {
         state.initialized = true;
         await refreshInitialData();
         syncScraperBackTopButton();
+        syncScraperBrowserHeight();
         return;
     }
     renderProviderTabs();
@@ -1831,5 +1946,6 @@ export async function ensureScraperManager({ firstVisit = false } = {}) {
     renderPlan();
     renderJobs();
     syncScraperBackTopButton();
+    syncScraperBrowserHeight();
     if (hasActiveJobs()) scheduleJobsPoll();
 }

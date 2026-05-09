@@ -540,6 +540,48 @@ def move_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_
         raise
 
 
+def copy_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要复制的文件")
+    target_id = str(target_cid or "0").strip() or "0"
+    try:
+        headers = {
+            "Cookie": normalized_cookie,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://115.com/",
+            "Origin": "https://115.com",
+            "User-Agent": "Mozilla/5.0 115-media-hub",
+        }
+        payload = {"pid": target_id}
+        for index, entry_id in enumerate(ids):
+            payload[f"fid[{index}]"] = entry_id
+        response = http_request_form_json(
+            "https://webapi.115.com/files/copy",
+            payload,
+            timeout=60,
+            extra_headers=headers,
+        )
+        success = bool((response or {}).get("state")) or int((response or {}).get("errno", 0) or 0) == 0
+        if not success:
+            detail = (
+                str((response or {}).get("error", "")).strip()
+                or str((response or {}).get("msg", "")).strip()
+                or str((response or {}).get("message", "")).strip()
+                or "115 复制失败"
+            )
+            raise RuntimeError(detail)
+        invalidate_115_entries_cache(target_id)
+        mark_cookie_health_success("115", trigger="runtime:copy_115_entries")
+        return {"ids": ids, "target_cid": target_id, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("115", exc, trigger="runtime:copy_115_entries")
+        raise
+
+
 def _is_115_mutation_success(response: Dict[str, Any]) -> bool:
     payload = response if isinstance(response, dict) else {}
     if bool(payload.get("state")) or bool(payload.get("success")):

@@ -755,6 +755,40 @@ def move_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, sourc
         raise
 
 
+def copy_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
+    normalized_cookie = str(cookie or "").strip()
+    if not normalized_cookie:
+        raise RuntimeError("Quark Cookie 未配置")
+    ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
+    if not ids:
+        raise RuntimeError("请选择要复制的文件")
+    target_id = str(target_cid or "0").strip() or "0"
+    try:
+        headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
+        url = _build_quark_api_url("/1/clouddrive/file/copy")
+        response = _request_quark_json_payload(
+            url,
+            {
+                "action_type": 1,
+                "to_pdir_fid": target_id,
+                "filelist": ids,
+                "fid_list": ids,
+                "exclude_fids": [],
+            },
+            headers,
+            timeout=60,
+            method="POST",
+            fallback="夸克复制失败",
+        )
+        if not _is_quark_success(response):
+            raise RuntimeError(_extract_quark_error(response, "夸克复制失败"))
+        mark_cookie_health_success("quark", trigger="runtime:copy_quark_entries")
+        return {"ids": ids, "target_cid": target_id, "response": response}
+    except Exception as exc:
+        mark_cookie_health_failure("quark", exc, trigger="runtime:copy_quark_entries")
+        raise
+
+
 def delete_quark_entries(cookie: str, entry_ids: List[str], parent_cid: str = "") -> Dict[str, Any]:
     normalized_cookie = str(cookie or "").strip()
     if not normalized_cookie:
