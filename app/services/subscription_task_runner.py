@@ -1,4 +1,5 @@
 from . import subscription as _subscription
+from ..memory import release_process_memory
 
 # The runner keeps the historical helper surface from subscription.py while
 # the large task orchestration functions live in this focused module.
@@ -4934,3 +4935,4 @@ async def run_subscription_task(
             await start_next_subscription_job()
         except Exception:
             pass
+        release_process_memory(f"subscription:{task_name}")

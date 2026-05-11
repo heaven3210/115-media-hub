@@ -307,7 +307,14 @@ _subscription_share_entry_refreshed_keys_var: contextvars.ContextVar[Optional[Se
 )
 
 
-def _build_subscription_share_entry_runtime_key(share_url: str, receive_code: str, cid: str) -> str:
+def _build_subscription_share_entry_runtime_key(
+    share_url: str,
+    receive_code: str,
+    cid: str,
+    *,
+    folders_only: bool = False,
+    max_entries: int = 0,
+) -> str:
     link_type = resolve_resource_link_type("", str(share_url or "").strip())
     return "|".join(
         [
@@ -315,6 +322,8 @@ def _build_subscription_share_entry_runtime_key(share_url: str, receive_code: st
             str(share_url or "").strip(),
             normalize_receive_code(receive_code),
             str(cid or "0").strip() or "0",
+            "folders" if folders_only else "all",
+            str(max(0, int(max_entries or 0))),
         ]
     )
 
@@ -326,15 +335,21 @@ async def _fetch_subscription_share_entries(
     cid: str,
     receive_code: str,
     force_refresh: bool = False,
+    *,
+    folders_only: bool = False,
+    max_entries: int = 0,
 ) -> Dict[str, Any]:
     normalized_share_url = str(share_url or "").strip()
     normalized_cid = str(cid or "0").strip() or "0"
     normalized_receive_code = normalize_receive_code(receive_code)
     link_type = resolve_resource_link_type("", normalized_share_url)
+    normalized_max_entries = max(0, int(max_entries or 0))
     runtime_key = _build_subscription_share_entry_runtime_key(
         normalized_share_url,
         normalized_receive_code,
         normalized_cid,
+        folders_only=folders_only,
+        max_entries=normalized_max_entries,
     )
     runtime_cache = _subscription_share_entry_runtime_cache_var.get()
     refreshed_keys = _subscription_share_entry_refreshed_keys_var.get()
@@ -349,6 +364,14 @@ async def _fetch_subscription_share_entries(
     settings = get_subscription_share_scan_runtime_settings(provider="quark" if link_type == "quark" else "115")
     request_timeout_seconds = max(6, min(30, int(SUBSCRIPTION_SHARE_SCAN_REQUEST_TIMEOUT_SECONDS or 12)))
     share_rate_limit_seconds = float(settings.get("share_scan_rate_limit_seconds", SUBSCRIPTION_SHARE_SCAN_RATE_LIMIT_SECONDS) or SUBSCRIPTION_SHARE_SCAN_RATE_LIMIT_SECONDS)
+    page_limit = 200 if link_type == "quark" else 400
+    if normalized_max_entries > 0:
+        page_limit = max(20, min(page_limit, normalized_max_entries))
+    max_pages = (
+        max(1, int((normalized_max_entries + page_limit - 1) // page_limit))
+        if normalized_max_entries > 0
+        else 0
+    )
 
     if link_type == "quark":
         await _throttle_subscription_share_fetch("quark", share_rate_limit_seconds)
@@ -361,6 +384,10 @@ async def _fetch_subscription_share_entries(
             normalized_receive_code,
             refresh_pending,
             request_timeout_seconds,
+            0,
+            page_limit,
+            max_pages,
+            folders_only,
         )
     else:
         result = await asyncio.to_thread(
@@ -374,6 +401,10 @@ async def _fetch_subscription_share_entries(
             request_timeout_seconds,
             share_rate_limit_seconds,
             SUBSCRIPTION_SHARE_SCAN_MAX_RETRIES,
+            0,
+            page_limit,
+            max_pages,
+            folders_only,
         )
     if isinstance(runtime_cache, dict):
         runtime_cache[runtime_key] = result

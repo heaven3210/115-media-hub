@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
+from ..memory import release_process_memory
 from ..services.resource import cancel_resource_job, retry_resource_job, run_resource_job, trigger_resource_job_refresh
 
 router = APIRouter()
@@ -74,6 +75,7 @@ resource_image_executor = ThreadPoolExecutor(
 resource_image_semaphore = asyncio.Semaphore(RESOURCE_IMAGE_PROXY_WORKERS)
 resource_image_cache_lock = threading.Lock()
 resource_image_cache: Dict[str, Dict[str, Any]] = {}
+resource_image_cache_bytes = 0
 resource_channel_sync_submit_lock = threading.Lock()
 resource_channel_sync_submitted = False
 
@@ -124,6 +126,7 @@ async def _run_resource_channel_sync(force: bool, limit_per_channel: Optional[in
         with resource_channel_sync_submit_lock:
             resource_channel_sync_submitted = False
         schedule_ui_state_push(0)
+        release_process_memory("resource-channel-sync")
 
 
 def submit_resource_channel_sync(force: bool, limit_per_channel: Optional[int] = None) -> bool:
@@ -374,6 +377,8 @@ def _import_resource_candidates_to_db(candidates: List[Dict[str, Any]]) -> Dict[
             updated += 1
     conn.commit()
     conn.close()
+    if inserted > 0 or updated > 0:
+        invalidate_resource_state_snapshot("resource-items-import")
     items = [get_resource_item(item_id) for item_id in item_ids]
     return {"inserted": inserted, "updated": updated, "items": items}
 
@@ -436,6 +441,7 @@ def _save_resource_sources_payload(incoming: Any) -> List[Dict[str, Any]]:
         normalized.append(source)
     cfg["resource_sources"] = normalized
     save_config(cfg)
+    invalidate_resource_state_snapshot("resource-sources-save")
     return normalized
 
 
@@ -1197,6 +1203,18 @@ def _normalize_resource_image_url(image_url: str) -> str:
     return urllib.parse.urlunsplit(parsed)
 
 
+def _resource_image_entry_size(entry: Dict[str, Any]) -> int:
+    body = (entry or {}).get("body", b"") if isinstance(entry, dict) else b""
+    return len(body or b"")
+
+
+def _drop_cached_resource_image_locked(image_url: str) -> None:
+    global resource_image_cache_bytes
+    removed = resource_image_cache.pop(image_url, None)
+    if isinstance(removed, dict):
+        resource_image_cache_bytes = max(0, resource_image_cache_bytes - _resource_image_entry_size(removed))
+
+
 def _get_cached_resource_image(image_url: str) -> Optional[Dict[str, Any]]:
     now_ts = time.monotonic()
     with resource_image_cache_lock:
@@ -1204,19 +1222,23 @@ def _get_cached_resource_image(image_url: str) -> Optional[Dict[str, Any]]:
         if not cached:
             return None
         if float(cached.get("expires_at", 0) or 0) <= now_ts:
-            resource_image_cache.pop(image_url, None)
+            _drop_cached_resource_image_locked(image_url)
             return None
         return dict(cached)
 
 
 def _store_cached_resource_image(image_url: str, entry: Dict[str, Any]) -> None:
+    global resource_image_cache_bytes
     if not image_url:
         return
     with resource_image_cache_lock:
+        previous = resource_image_cache.get(image_url)
+        if isinstance(previous, dict):
+            resource_image_cache_bytes = max(0, resource_image_cache_bytes - _resource_image_entry_size(previous))
         resource_image_cache[image_url] = entry
+        resource_image_cache_bytes += _resource_image_entry_size(entry)
         if len(resource_image_cache) <= RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES:
-            total_bytes = sum(len(item.get("body", b"") or b"") for item in resource_image_cache.values())
-            if not RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES or total_bytes <= RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES:
+            if not RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES or resource_image_cache_bytes <= RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES:
                 return
         ordered_items = sorted(
             resource_image_cache.items(),
@@ -1225,15 +1247,13 @@ def _store_cached_resource_image(image_url: str, entry: Dict[str, Any]) -> None:
         while len(resource_image_cache) > RESOURCE_IMAGE_PROXY_CACHE_MAX_ENTRIES and ordered_items:
             oldest_url, _ = ordered_items.pop(0)
             if oldest_url != image_url:
-                resource_image_cache.pop(oldest_url, None)
+                _drop_cached_resource_image_locked(oldest_url)
         if RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES:
-            total_bytes = sum(len(item.get("body", b"") or b"") for item in resource_image_cache.values())
-            while total_bytes > RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES and ordered_items:
+            while resource_image_cache_bytes > RESOURCE_IMAGE_PROXY_CACHE_MAX_BYTES and ordered_items:
                 oldest_url, _ = ordered_items.pop(0)
                 if oldest_url == image_url:
                     continue
-                removed = resource_image_cache.pop(oldest_url, None)
-                total_bytes -= len(removed.get("body", b"") or b"") if isinstance(removed, dict) else 0
+                _drop_cached_resource_image_locked(oldest_url)
 
 
 def _build_resource_image_response(cached: Dict[str, Any], *, cache_state: str) -> Response:

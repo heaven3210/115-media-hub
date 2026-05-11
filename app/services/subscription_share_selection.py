@@ -39,6 +39,17 @@ def _subscription_share_scan_has_dir_room(scanned_dirs: int, pending_dirs: int, 
     return normalized_limit <= 0 or (max(0, int(scanned_dirs or 0)) + max(0, int(pending_dirs or 0))) < normalized_limit
 
 
+def _subscription_share_branch_fetch_limit(max_entries: int, scanned_entries: int, branch_count: int) -> int:
+    normalized_limit = _normalize_subscription_share_scan_limit(max_entries)
+    if normalized_limit <= 0:
+        return 0
+    remaining = max(0, normalized_limit - max(0, int(scanned_entries or 0)))
+    if remaining <= 0:
+        return 0
+    branches = max(1, int(branch_count or 1))
+    return max(20, int((remaining + branches - 1) // branches))
+
+
 def _subscription_task_min_file_size_bytes(task: Dict[str, Any]) -> int:
     min_size_mb = normalize_subscription_min_file_size_mb((task or {}).get("min_file_size_mb", 0))
     if min_size_mb <= 0:
@@ -258,6 +269,7 @@ async def _refine_subscription_share_selection_for_task(
                     normalized_cid,
                     receive_code,
                     force_refresh,
+                    folders_only=True,
                 ),
                 timeout=timeout_seconds,
             )
@@ -427,6 +439,7 @@ async def _find_subscription_share_dir_by_leaf_fallback(
                     normalized_cid,
                     receive_code,
                     force_refresh,
+                    folders_only=True,
                 ),
                 timeout=timeout_seconds,
             )
@@ -688,6 +701,7 @@ async def _build_subscription_share_subdir_selection(
                     "0",
                     receive_code,
                     force_refresh,
+                    folders_only=True,
                 ),
                 timeout=request_timeout,
             )
@@ -730,6 +744,7 @@ async def _build_subscription_share_subdir_selection(
                         root_wrapper_cid,
                         receive_code,
                         force_refresh,
+                        folders_only=True,
                     ),
                     timeout=request_timeout,
                 )
@@ -814,6 +829,7 @@ async def _build_subscription_share_subdir_selection(
                     child_cid,
                     receive_code,
                     force_refresh,
+                    folders_only=True,
                 ),
                 timeout=request_timeout,
             )
@@ -968,6 +984,7 @@ async def _build_tv_share_selection_for_missing_episodes(
             break
 
         check_subscription_cancelled()
+        branch_fetch_limit = _subscription_share_branch_fetch_limit(max_entries, scanned_entries, len(batch))
         fetch_tasks = [
             asyncio.wait_for(
                 _fetch_subscription_share_entries(
@@ -976,6 +993,7 @@ async def _build_tv_share_selection_for_missing_episodes(
                     raw_text,
                     normalized_cid,
                     receive_code,
+                    max_entries=branch_fetch_limit,
                 ),
                 timeout=request_timeout,
             )
@@ -1212,6 +1230,7 @@ async def _scan_subscription_share_tree_snapshot(
             break
 
         check_subscription_cancelled()
+        branch_fetch_limit = _subscription_share_branch_fetch_limit(max_entries, scanned_entries, len(batch))
         fetch_tasks = [
             asyncio.wait_for(
                 _fetch_subscription_share_entries(
@@ -1221,6 +1240,7 @@ async def _scan_subscription_share_tree_snapshot(
                     normalized_cid,
                     receive_code,
                     force_refresh,
+                    max_entries=branch_fetch_limit,
                 ),
                 timeout=request_timeout,
             )
@@ -1632,6 +1652,7 @@ async def _scan_subscription_share_episode_manifest(
             break
 
         check_subscription_cancelled()
+        branch_fetch_limit = _subscription_share_branch_fetch_limit(max_entries, scanned_entries, len(batch))
         fetch_tasks = [
             asyncio.wait_for(
                 _fetch_subscription_share_entries(
@@ -1641,6 +1662,7 @@ async def _scan_subscription_share_episode_manifest(
                     str(cid or "0").strip() or "0",
                     receive_code,
                     force_refresh,
+                    max_entries=branch_fetch_limit,
                 ),
                 timeout=max(10, int(per_request_timeout or 25)),
             )

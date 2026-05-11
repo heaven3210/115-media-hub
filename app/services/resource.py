@@ -1,5 +1,6 @@
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
+from ..memory import release_process_memory
 from .monitor import queue_monitor_job
 
 
@@ -424,3 +425,4 @@ async def run_resource_job(job_id: int) -> None:
     finally:
         resource_job_running.discard(job_id)
         resource_job_cancel_requested.discard(job_id)
+        release_process_memory(f"resource-job:{job_id}")

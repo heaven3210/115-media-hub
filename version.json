@@ -1,11 +1,11 @@
 {
-  "version": "0.3.19",
-  "buildDate": "2026-05-09T21:09:35+08:00",
+  "version": "0.3.20",
+  "buildDate": "2026-05-12T00:51:34+08:00",
   "notes": [
-    "刮削页竖屏文件列表恢复全选和排序表头",
-    "竖屏文件列表改为紧凑三列表格",
-    "长文件名保持完整换行显示",
-    "刮削预览模式保留原有移动端确认布局"
+    "优化 NAS 常驻运行下的内存释放与日志读取",
+    "订阅分享扫描按目录和条目预算收敛请求范围",
+    "资源状态和任务状态新增短 TTL 快照层",
+    "SSE 增量状态和图片代理缓存降低重复开销"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

@@ -564,6 +564,14 @@ RESOURCE_JOB_STALE_RECOVER_SECONDS = max(
 )
 RESOURCE_JOB_COMPLETED_KEEP = max(100, min(10000, int(os.environ.get("RESOURCE_JOB_COMPLETED_KEEP", 1000) or 1000)))
 RESOURCE_JOB_FAILED_KEEP = max(100, min(10000, int(os.environ.get("RESOURCE_JOB_FAILED_KEEP", 500) or 500)))
+RESOURCE_JOBS_STATE_SNAPSHOT_TTL_SECONDS = max(
+    0.0,
+    min(5.0, float(os.environ.get("RESOURCE_JOBS_STATE_SNAPSHOT_TTL_SECONDS", 1.5) or 1.5)),
+)
+RESOURCE_COMPACT_STATE_SNAPSHOT_TTL_SECONDS = max(
+    0.0,
+    min(5.0, float(os.environ.get("RESOURCE_COMPACT_STATE_SNAPSHOT_TTL_SECONDS", 2.0) or 2.0)),
+)
 TMDB_API_BASE_URL = os.environ.get("TMDB_API_BASE_URL", "https://api.themoviedb.org/3").strip().rstrip("/")
 TMDB_IMAGE_BASE_URL = os.environ.get("TMDB_IMAGE_BASE_URL", "https://image.tmdb.org/t/p").strip().rstrip("/")
 TMDB_REQUEST_TIMEOUT_SECONDS = max(5, int(os.environ.get("TMDB_REQUEST_TIMEOUT_SECONDS", 20) or 20))
@@ -3464,6 +3472,57 @@ RESOURCE_JOB_RECOVERY_INTERVAL_SECONDS = max(
 )
 resource_job_recovery_lock = threading.Lock()
 resource_job_recovery_last_ts = 0.0
+resource_state_snapshot_lock = threading.Lock()
+resource_state_snapshot_epoch = 0
+resource_jobs_state_snapshot_cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+resource_compact_state_snapshot_cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+
+def invalidate_resource_state_snapshot(reason: str = "") -> None:
+    global resource_state_snapshot_epoch
+    with resource_state_snapshot_lock:
+        resource_state_snapshot_epoch += 1
+        resource_jobs_state_snapshot_cache.clear()
+        resource_compact_state_snapshot_cache.clear()
+
+
+def _get_resource_state_snapshot(
+    cache: Dict[Tuple[Any, ...], Dict[str, Any]],
+    key: Tuple[Any, ...],
+    ttl_seconds: float,
+) -> Optional[Dict[str, Any]]:
+    if ttl_seconds <= 0:
+        return None
+    now_ts = time.monotonic()
+    with resource_state_snapshot_lock:
+        entry = cache.get(key)
+        if not entry:
+            return None
+        if int(entry.get("epoch", -1) or -1) != resource_state_snapshot_epoch:
+            cache.pop(key, None)
+            return None
+        if float(entry.get("expires_at", 0.0) or 0.0) <= now_ts:
+            cache.pop(key, None)
+            return None
+        payload = entry.get("payload")
+    return clone_jsonable(payload) if isinstance(payload, dict) else None
+
+
+def _set_resource_state_snapshot(
+    cache: Dict[Tuple[Any, ...], Dict[str, Any]],
+    key: Tuple[Any, ...],
+    payload: Dict[str, Any],
+    ttl_seconds: float,
+) -> None:
+    if ttl_seconds <= 0:
+        return
+    now_ts = time.monotonic()
+    with resource_state_snapshot_lock:
+        cache[key] = {
+            "epoch": resource_state_snapshot_epoch,
+            "expires_at": now_ts + ttl_seconds,
+            "payload": clone_jsonable(payload),
+        }
 
 
 def normalize_cookie_health_provider(value: Any) -> str:
@@ -4591,6 +4650,10 @@ def build_subscription_log_page_payload(
     normalized_limit = max(1, min(20, int(limit or SUBSCRIPTION_LOG_PAGE_LIMIT)))
     normalized_after = max(0, int(after or 0))
     normalized_before = max(0, int(before or 0))
+    if normalized_after <= 0 and normalized_before <= 0:
+        memory_payload = build_subscription_memory_log_page_payload(limit=normalized_limit)
+        if memory_payload:
+            return memory_payload
     lines = read_log_lines(SUBSCRIPTION_LOG_PATH)
     total = len(lines)
     latest_seq = max(total, int(subscription_log_seq or 0))
@@ -4650,6 +4713,53 @@ def build_subscription_log_page_payload(
         "page_task_limit": normalized_limit,
         "task_block_count": sum(1 for block in selected_blocks if bool(block.get("task"))),
         "task_block_total": task_block_total,
+    }
+
+
+def build_subscription_memory_log_page_payload(
+    *,
+    limit: int = SUBSCRIPTION_LOG_PAGE_LIMIT,
+) -> Dict[str, Any]:
+    normalized_limit = max(1, min(20, int(limit or SUBSCRIPTION_LOG_PAGE_LIMIT)))
+    source = subscription_status.get("logs", [])
+    if not isinstance(source, list) or not source:
+        return {}
+    entries = [
+        _serialize_subscription_ui_log(entry)
+        for entry in source
+        if isinstance(entry, dict) and max(0, int(entry.get("seq", 0) or 0)) > 0
+    ]
+    if not entries:
+        return {}
+    blocks = _build_subscription_log_blocks(entries)
+    selected_blocks, selected_start, _ = _tail_subscription_log_blocks_by_task_count(blocks, normalized_limit)
+    page_entries = _flatten_subscription_log_blocks(selected_blocks)
+    latest_seq = max(
+        int(subscription_log_seq or 0),
+        max((int(entry.get("seq", 0) or 0) for entry in entries), default=0),
+    )
+    oldest_available_seq = int(entries[0].get("seq", 0) or 0)
+    selected_task_count = sum(1 for block in selected_blocks if bool(block.get("task")))
+    stored_task_total = max(0, int(subscription_log_task_total or 0))
+    has_older_memory = selected_start > 0
+    has_older_file = oldest_available_seq > 1 or (stored_task_total > 0 and stored_task_total > selected_task_count)
+    return {
+        "ok": True,
+        "logs": page_entries,
+        "total": latest_seq,
+        "latest_seq": latest_seq,
+        "oldest_available_seq": oldest_available_seq,
+        "oldest_seq": page_entries[0]["seq"] if page_entries else 0,
+        "newest_seq": page_entries[-1]["seq"] if page_entries else 0,
+        "has_more_before": bool(has_older_memory or has_older_file),
+        "has_more_after": False,
+        "page_log_limit": normalized_limit,
+        "line_count": len(page_entries),
+        "available_total": len(entries),
+        "page_task_limit": normalized_limit,
+        "task_block_count": selected_task_count,
+        "task_block_total": max(stored_task_total, selected_task_count),
+        "source": "memory",
     }
 
 
@@ -4806,8 +4916,13 @@ def build_ui_state_payload(
     active_cfg = cfg or get_config()
     full = {
         "main": build_main_status_payload(log_limit=log_limit),
-        "monitor": build_monitor_status_payload(active_cfg, log_limit=log_limit),
-        "subscription": build_subscription_status_payload(active_cfg, log_limit=log_limit, include_logs=False),
+        "monitor": build_monitor_status_payload(active_cfg, log_limit=log_limit, compact=incremental),
+        "subscription": build_subscription_status_payload(
+            active_cfg,
+            log_limit=log_limit,
+            compact=incremental,
+            include_logs=False,
+        ),
         "sign115": build_sign115_status_payload(active_cfg),
         "cookie_health": build_cookie_health_payload(active_cfg),
         "resource_channel_sync": build_resource_channel_sync_payload(),
@@ -4841,6 +4956,7 @@ def set_resource_channel_sync_status(**fields: Any) -> None:
         if changed and "last_updated_at" not in fields:
             resource_channel_sync_status["last_updated_at"] = now_text()
     if changed:
+        invalidate_resource_state_snapshot("resource-channel-sync")
         schedule_ui_state_push(0)
 
 
@@ -4854,25 +4970,67 @@ def build_resource_jobs_state_payload(
     cfg: Optional[Dict[str, Any]] = None,
     offset: int = 0,
     status_filter: str = "",
+    include_monitor_tasks: bool = True,
+    active_job_limit: int = 80,
 ) -> Dict[str, Any]:
+    normalized_limit = max(1, min(int(limit or 20), 200))
+    normalized_offset = max(0, int(offset or 0))
+    normalized_filter = normalize_resource_job_status_filter(status_filter)
+    normalized_active_job_limit = max(1, min(int(active_job_limit or 80), 200))
+    cache_key = (
+        "resource-jobs",
+        normalized_limit,
+        normalized_offset,
+        normalized_filter,
+        bool(include_monitor_tasks),
+        normalized_active_job_limit,
+    )
+    cached_payload = _get_resource_state_snapshot(
+        resource_jobs_state_snapshot_cache,
+        cache_key,
+        RESOURCE_JOBS_STATE_SNAPSHOT_TTL_SECONDS,
+    )
+    if cached_payload:
+        return cached_payload
+
     active_cfg = cfg or get_config()
-    jobs_page = list_resource_jobs_page(limit=limit, offset=offset, status_filter=status_filter)
+    jobs_page = list_resource_jobs_page(limit=normalized_limit, offset=normalized_offset, status_filter=normalized_filter)
     jobs = jobs_page.get("jobs", [])
     counts = count_resource_jobs_by_status()
-    active_jobs_page = list_resource_jobs_page(limit=80, offset=0, status_filter="active")
-    return {
+    active_count = max(0, int(counts.get("active", 0) or 0))
+    active_jobs: List[Dict[str, Any]] = []
+    if active_count > 0:
+        page_limit = int((jobs_page.get("pagination", {}) or {}).get("limit", 0) or normalized_limit)
+        if normalized_filter == "active" and normalized_offset == 0 and page_limit >= min(active_count, normalized_active_job_limit):
+            active_jobs = jobs
+        else:
+            active_jobs_page = list_resource_jobs_page(
+                limit=normalized_active_job_limit,
+                offset=0,
+                status_filter="active",
+            )
+            active_jobs = active_jobs_page.get("jobs", [])
+    payload = {
         "jobs": clone_jsonable(jobs),
-        "active_jobs": clone_jsonable(active_jobs_page.get("jobs", [])),
-        "monitor_tasks": clone_jsonable(active_cfg.get("monitor_tasks", [])),
+        "active_jobs": clone_jsonable(active_jobs),
         "pagination": clone_jsonable(jobs_page.get("pagination", {})),
         "job_counts": clone_jsonable(counts),
         "stats": {
             "total_job_count": int(counts.get("total", 0) or 0),
-            "active_job_count": int(counts.get("active", 0) or 0),
+            "active_job_count": active_count,
             "completed_job_count": int(counts.get("completed", 0) or 0),
             "failed_job_count": int(counts.get("failed", 0) or 0),
         },
     }
+    if include_monitor_tasks:
+        payload["monitor_tasks"] = clone_jsonable(active_cfg.get("monitor_tasks", []))
+    _set_resource_state_snapshot(
+        resource_jobs_state_snapshot_cache,
+        cache_key,
+        payload,
+        RESOURCE_JOBS_STATE_SNAPSHOT_TTL_SECONDS,
+    )
+    return payload
 
 
 def recover_resource_jobs_if_due(force: bool = False) -> Dict[str, Any]:
@@ -4924,6 +5082,7 @@ def _build_resource_state_payload_snapshot(
         cfg=cfg,
         offset=job_offset,
         status_filter=job_status_filter,
+        include_monitor_tasks=False,
     )
     jobs = jobs_state.get("jobs", [])
     active_jobs = jobs_state.get("active_jobs", [])
@@ -5060,6 +5219,24 @@ async def build_resource_state_payload(
     normalized_search_source = normalize_resource_search_source(search_source)
     normalized_provider_filter = normalize_resource_provider_filter(provider_filter)
     normalized_search_id = normalize_resource_search_id(search_id)
+    normalized_job_limit = max(1, min(int(job_limit or 20), 200))
+    normalized_job_offset = max(0, int(job_offset or 0))
+    normalized_job_status_filter = normalize_resource_job_status_filter(job_status_filter)
+    compact_snapshot_key = (
+        "resource-compact",
+        normalized_provider_filter,
+        normalized_job_limit,
+        normalized_job_offset,
+        normalized_job_status_filter,
+    )
+    if compact and not keyword:
+        cached_payload = _get_resource_state_snapshot(
+            resource_compact_state_snapshot_cache,
+            compact_snapshot_key,
+            RESOURCE_COMPACT_STATE_SNAPSHOT_TTL_SECONDS,
+        )
+        if cached_payload:
+            return cached_payload
     try:
         check_resource_search_cancelled(normalized_search_id)
         if keyword and normalized_search_source == "pansou":
@@ -5093,18 +5270,26 @@ async def build_resource_state_payload(
             "pages_scanned": 0,
             "cancelled": True,
         }
-    return await asyncio.to_thread(
+    payload = await asyncio.to_thread(
         _build_resource_state_payload_snapshot,
         cfg,
         keyword,
         search_meta,
         normalized_search_source,
         normalized_provider_filter,
-        job_limit,
-        job_offset,
-        job_status_filter,
+        normalized_job_limit,
+        normalized_job_offset,
+        normalized_job_status_filter,
         compact,
     )
+    if compact and not keyword:
+        _set_resource_state_snapshot(
+            resource_compact_state_snapshot_cache,
+            compact_snapshot_key,
+            payload,
+            RESOURCE_COMPACT_STATE_SNAPSHOT_TTL_SECONDS,
+        )
+    return payload
 
 
 async def sync_telegram_channels(force: bool = False, limit_per_channel: Optional[int] = None) -> Dict[str, Any]:
@@ -5242,6 +5427,8 @@ async def sync_telegram_channels(force: bool = False, limit_per_channel: Optiona
     finally:
         conn.close()
 
+    if synced_channels > 0 or cache_pruned > 0:
+        invalidate_resource_state_snapshot("resource-channel-sync-result")
     return {
         "ok": not errors,
         "synced": synced_channels,

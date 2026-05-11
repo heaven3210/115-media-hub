@@ -1,4 +1,5 @@
 import os
+from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Set
 
@@ -134,7 +135,7 @@ def read_log_tail(path: str, limit: int = 200) -> List[str]:
         return []
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = [line.rstrip("\n") for line in f.readlines()]
+            lines = deque((line.rstrip("\n") for line in f), maxlen=normalized_limit)
     except Exception:
         return []
     compact = [line for line in lines if str(line or "").strip()]
@@ -149,7 +150,10 @@ def read_log_lines(path: str, limit: int = 0) -> List[str]:
         return []
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = [line.rstrip("\n") for line in f.readlines()]
+            if normalized_limit > 0:
+                lines = list(deque((line.rstrip("\n") for line in f), maxlen=normalized_limit))
+            else:
+                lines = [line.rstrip("\n") for line in f]
     except Exception:
         return []
     compact = [line for line in lines if str(line or "").strip()]

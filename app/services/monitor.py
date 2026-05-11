@@ -1,5 +1,6 @@
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
+from ..memory import release_process_memory
 from .notify import push_monitor_success_notification
 
 def write_strm_file(target_file: str, url: str) -> bool:
@@ -410,6 +411,7 @@ async def run_monitor_task(
         monitor_status["current_task"] = ""
         monitor_control["cancel"] = False
         schedule_ui_state_push(0)
+        release_process_memory(f"monitor:{task_name}")
         await start_next_monitor_job()
 
 
