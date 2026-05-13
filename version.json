@@ -1,9 +1,9 @@
 {
-  "version": "0.3.22",
-  "buildDate": "2026-05-13T18:26:28+08:00",
+  "version": "0.3.23",
+  "buildDate": "2026-05-13T18:58:04+08:00",
   "notes": [
-    "更新版本号到 0.3.22",
-    "为首页资源卡片状态刷新优化预留新的发布点"
+    "更新版本号到 0.3.23",
+    "修复 115 单季订阅在未精确命中文件时误导入整包合集的问题"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

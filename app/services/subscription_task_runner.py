@@ -295,6 +295,18 @@ def _build_subscription_candidate_manifest_cache_key(provider: str, candidate: D
     return f"{link_url.lower()}|{receive_code.lower()}"
 
 
+def _is_115_tv_file_level_selection(selection: Any) -> bool:
+    normalized = normalize_share_selection_meta(selection or {})
+    selected_entries = (
+        normalized.get("selected_entries", [])
+        if isinstance(normalized.get("selected_entries"), list)
+        else []
+    )
+    if not selected_entries:
+        return False
+    return all(isinstance(entry, dict) and not bool(entry.get("is_dir")) for entry in selected_entries)
+
+
 def _pick_subscription_candidate_manifest_prewarm_rows(
     candidates: List[Dict[str, Any]],
     provider: str,
@@ -4002,14 +4014,53 @@ async def run_subscription_task(
                                 )
                             else:
                                 scan_tail = _format_subscription_share_scan_log_tail(selection_stats)
-                                await write_subscription_log(
-                                    (
-                                        f"候选资源 #{index} 尝试按缺失集精细转存未命中（{scan_tail}），回退整包转存"
-                                    ),
-                                    "warn",
-                                )
+                                if is_subscription_multi_season_mode(task):
+                                    await write_subscription_log(
+                                        (
+                                            f"候选资源 #{index} 尝试按缺失集精细转存未命中（{scan_tail}），回退整包转存"
+                                        ),
+                                        "warn",
+                                    )
+                                else:
+                                    skipped_precise_mismatch_candidates += 1
+                                    skip_due_overlap_fallback = True
+                                    await write_subscription_log(
+                                        (
+                                            f"候选资源 #{index} 尝试按缺失集精细转存未命中（{scan_tail}），"
+                                            "单季订阅已跳过整包导入"
+                                        ),
+                                        "warn",
+                                    )
                     if skip_due_overlap_fallback:
                         continue
+                if (
+                    task["media_type"] == "tv"
+                    and candidate_link_type == "115share"
+                    and not is_subscription_multi_season_mode(task)
+                    and not _is_115_tv_file_level_selection(job_payload.get("share_selection", {}))
+                ):
+                    skipped_precise_mismatch_candidates += 1
+                    if candidate_manifest_payload:
+                        scan_tail = _format_subscription_share_scan_log_tail(candidate_manifest_payload)
+                        covered_preview = str(candidate_manifest_payload.get("covered_preview", "") or "--").strip()
+                        await write_subscription_log(
+                            (
+                                f"候选资源 #{index} 分享清单未识别到订阅季 "
+                                f"S{int(task.get('season', 1) or 1):02d} 的可转存剧集文件"
+                                f"（清单命中 {covered_preview}，{scan_tail}），已跳过整包导入"
+                            ),
+                            "warn",
+                        )
+                    else:
+                        await write_subscription_log(
+                            (
+                                f"候选资源 #{index} 未完成分享清单精细识别，"
+                                "单季订阅已跳过整包导入，避免把整季/全剧合集转存到目标季目录"
+                            ),
+                            "warn",
+                        )
+                    await maybe_wait_between_attempts()
+                    continue
                 job_plans: List[Dict[str, Any]] = [
                     {
                         "payload": job_payload,
