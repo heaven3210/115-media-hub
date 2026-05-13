@@ -362,6 +362,21 @@ def _format_notify_episode_summary(episodes: List[int]) -> str:
     return f"E{normalized[0]}-E{normalized[-1]}"
 
 
+def _escape_notify_font_text(value: Any) -> str:
+    text = str(value or "")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _format_notify_highlight(value: Any, color: str = "info") -> str:
+    text = str(value or "").strip()
+    if not text or text == "--":
+        return text
+    normalized_color = str(color or "info").strip().lower()
+    if normalized_color not in {"info", "comment", "warning"}:
+        normalized_color = "info"
+    return f'<font color="{normalized_color}">{_escape_notify_font_text(text)}</font>'
+
+
 def _compact_text(value: Any, limit: int = 140) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if limit > 0 and len(text) > limit:
@@ -413,11 +428,14 @@ def _build_subscription_success_markdown(
     ]
     if media_type == "tv":
         episode_summary = _format_notify_episode_summary(notify_episodes)
+        highlighted_episode_summary = (
+            _format_notify_highlight(episode_summary, "warning") if episode_summary else "--"
+        )
         total_episodes = resolve_subscription_tv_total_episodes(task, state_total=0)
         progress_label = f"E{int(next_episode)}" if int(next_episode or 0) > 0 else "--"
         if total_episodes > 0 and int(next_episode or 0) > 0:
             progress_label = f"{progress_label} / {total_episodes}"
-        lines.append(f"> 概览：新增 {episode_summary or '--'}（共 {len(notify_episodes)} 集）")
+        lines.append(f"> 概览：新增 {highlighted_episode_summary}（共 {len(notify_episodes)} 集）")
         if int(next_episode or 0) > 0 or total_episodes > 0:
             lines.append(f"> 当前进度：{progress_label}")
     else:
@@ -426,7 +444,7 @@ def _build_subscription_success_markdown(
         [
             ">",
             "> 入库详情：",
-            f"> - 命中资源：{resource_title}",
+            f"> - 命中资源：{_format_notify_highlight(resource_title, 'info')}",
             f"> - 来源渠道：{source_label}",
             f"> - 保存路径：`{savepath_label}`",
         ]
