@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from ..core import *  # noqa: F401,F403
-from ..services.strm_files import delete_orphan_metadata_dirs, preview_orphan_metadata_dirs
+from ..services.strm_files import delete_orphan_metadata_dirs, list_local_scan_dirs, preview_orphan_metadata_dirs
 
 router = APIRouter()
 
@@ -208,14 +208,31 @@ _DEFAULT_115_USER_AGENT = "Mozilla/5.0 115-media-hub"
 
 @router.get("/strm/orphan-metadata/preview")
 async def preview_strm_orphan_metadata(request: Request) -> Dict[str, Any]:
-    return await asyncio.to_thread(preview_orphan_metadata_dirs)
+    root = request.query_params.get("root")
+    try:
+        return await asyncio.to_thread(preview_orphan_metadata_dirs, root)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
 
 
 @router.post("/strm/orphan-metadata/delete")
 async def delete_strm_orphan_metadata(request: Request) -> Dict[str, Any]:
     data = await request.json()
     paths = data.get("paths", []) if isinstance(data, dict) else []
-    return await asyncio.to_thread(delete_orphan_metadata_dirs, paths)
+    root = data.get("root") if isinstance(data, dict) else None
+    try:
+        return await asyncio.to_thread(delete_orphan_metadata_dirs, paths, root)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
+
+
+@router.get("/strm/orphan-metadata/local-dirs")
+async def list_strm_cleanup_local_dirs(request: Request) -> Dict[str, Any]:
+    path = request.query_params.get("path")
+    try:
+        return await asyncio.to_thread(list_local_scan_dirs, path)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
 
 
 def _normalize_115_user_agent(value: Any) -> str:

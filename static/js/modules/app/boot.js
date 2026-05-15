@@ -587,6 +587,9 @@
         document.getElementById('resource-import-modal')?.addEventListener('click', (e) => {
             if (e.target.id === 'resource-import-modal') closeResourceJobModal();
         });
+        document.getElementById('strm-cleanup-modal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'strm-cleanup-modal') closeStrmCleanupTool();
+        });
         document.getElementById('monitor-folder-modal')?.addEventListener('click', (e) => {
             if (e.target.id === 'monitor-folder-modal') closeMonitorFolderModal();
         });
@@ -750,6 +753,11 @@
             const subscriptionModal = document.getElementById('subscription-modal');
             if (e.key === 'Escape' && subscriptionModal && !subscriptionModal.classList.contains('hidden')) {
                 closeSubscriptionModal();
+                return;
+            }
+            const strmCleanupModal = document.getElementById('strm-cleanup-modal');
+            if (e.key === 'Escape' && strmCleanupModal && !strmCleanupModal.classList.contains('hidden')) {
+                closeStrmCleanupTool();
                 return;
             }
             if (e.key === 'Escape' && resourceQuickLinkModalOpen) {

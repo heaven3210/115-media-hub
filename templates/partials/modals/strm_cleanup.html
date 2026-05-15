@@ -1,0 +1,64 @@
+        <div id="strm-cleanup-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-[58] p-4">
+            <div class="strm-cleanup-modal-shell group-card modal-card" role="dialog" aria-modal="true" aria-labelledby="strm-cleanup-modal-title">
+                <div class="strm-cleanup-modal-head">
+                    <div class="min-w-0">
+                        <h3 id="strm-cleanup-modal-title" class="group-title mb-1">STRM 残留目录清理</h3>
+                        <div class="strm-cleanup-subtitle">扫描服务端本地目录下已经没有 `.strm` 的残留目录；只允许删除空目录和仅剩刮削元数据的目录，含其他文件的目录仅提示手动检查。</div>
+                        <div id="strm-orphan-summary" class="strm-cleanup-summary">尚未扫描</div>
+                    </div>
+                    <button type="button" class="strm-cleanup-close" onclick="closeStrmCleanupTool()" aria-label="关闭 STRM 残留目录清理">关闭</button>
+                </div>
+
+                <div class="strm-cleanup-root-panel">
+                    <label class="strm-cleanup-root-label" for="strm-cleanup-root-input">扫描根目录（服务端路径）</label>
+                    <div class="strm-cleanup-root-control">
+                        <input id="strm-cleanup-root-input" class="strm-cleanup-root-input" placeholder="默认 STRM 根目录" autocomplete="off" readonly aria-readonly="true">
+                        <div class="strm-cleanup-root-actions">
+                            <button type="button" id="strm-cleanup-root-picker-btn" class="strm-cleanup-root-btn" onclick="toggleStrmCleanupRootPicker()">选择扫描路径</button>
+                            <button type="button" class="strm-cleanup-root-btn" onclick="resetStrmCleanupRoot()">恢复默认</button>
+                        </div>
+                    </div>
+                    <div id="strm-cleanup-root-hint" class="strm-cleanup-root-hint">默认使用 STRM 根目录。点击“选择扫描路径”后，下方列表会临时切换成目录选择。</div>
+                </div>
+
+                <div class="strm-cleanup-toolbar">
+                    <div class="strm-cleanup-actions">
+                        <button type="button" id="strm-orphan-scan-btn" onclick="scanOrphanMetadataDirs()" class="strm-cleanup-scan-btn">扫描残留目录</button>
+                        <button type="button" id="strm-orphan-delete-btn" onclick="deleteSelectedOrphanMetadataDirs()" class="strm-cleanup-delete-btn btn-disabled" disabled>删除选中</button>
+                    </div>
+                    <div id="strm-cleanup-filter-tabs" class="strm-cleanup-filter-tabs" role="group" aria-label="扫描结果筛选">
+                        <button type="button" class="strm-cleanup-filter is-active" data-strm-orphan-filter="all" onclick="setStrmCleanupFilter('all')">全部 <span data-strm-filter-count="all">0</span></button>
+                        <button type="button" class="strm-cleanup-filter" data-strm-orphan-filter="metadata" onclick="setStrmCleanupFilter('metadata')">仅剩元数据 <span data-strm-filter-count="metadata">0</span></button>
+                        <button type="button" class="strm-cleanup-filter" data-strm-orphan-filter="empty" onclick="setStrmCleanupFilter('empty')">空文件夹 <span data-strm-filter-count="empty">0</span></button>
+                        <button type="button" class="strm-cleanup-filter" data-strm-orphan-filter="manual" onclick="setStrmCleanupFilter('manual')">需手动检查 <span data-strm-filter-count="manual">0</span></button>
+                    </div>
+                </div>
+
+                <div id="strm-cleanup-browser-panel" class="strm-cleanup-browser-panel hidden">
+                    <div class="strm-cleanup-browser-head">
+                        <div id="strm-cleanup-root-browser-summary" class="strm-cleanup-browser-summary">尚未读取目录</div>
+                        <div class="strm-cleanup-browser-actions">
+                            <button type="button" id="strm-cleanup-root-parent-btn" class="strm-cleanup-root-btn" onclick="goStrmCleanupRootParent()">上级</button>
+                            <button type="button" id="strm-cleanup-root-use-btn" class="strm-cleanup-root-primary-btn" onclick="useBrowsedStrmCleanupRoot()">使用当前目录</button>
+                            <button type="button" id="strm-cleanup-root-refresh-btn" class="strm-cleanup-root-btn" onclick="refreshStrmCleanupRootBrowser()">刷新</button>
+                        </div>
+                    </div>
+                    <div id="strm-cleanup-root-browser-list" class="strm-cleanup-browser-list"></div>
+                </div>
+
+                <div id="strm-cleanup-results-panel" class="resource-browser-table strm-cleanup-table">
+                    <div class="resource-browser-header strm-cleanup-header">
+                        <label class="resource-browser-name-cell">
+                            <input id="strm-orphan-check-all" type="checkbox" class="ui-checkbox ui-checkbox-sm" onchange="setVisibleOrphanMetadataChecked(this.checked)" aria-label="选择当前可清理结果">
+                            <span>目录路径</span>
+                        </label>
+                        <div class="strm-cleanup-col-kind">类型</div>
+                        <div class="strm-cleanup-col-detail">内容</div>
+                        <div class="strm-cleanup-col-time">修改时间</div>
+                    </div>
+                    <div id="strm-orphan-list" class="resource-browser-body strm-cleanup-list">
+                        <div class="resource-browser-empty">点击“扫描残留目录”开始扫描当前目录；如需切换路径，可点上方“选择扫描路径”。</div>
+                    </div>
+                </div>
+            </div>
+        </div>

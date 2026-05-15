@@ -9,6 +9,7 @@ from app.core import normalize_task
 from app.services.strm_files import (
     delete_managed_strm_file,
     delete_orphan_metadata_dirs,
+    list_local_scan_dirs,
     preview_orphan_metadata_dirs,
     remove_empty_parent_dirs,
 )
@@ -48,7 +49,8 @@ class StrmCleanupServiceTest(unittest.TestCase):
             (root / "Manual").mkdir()
             (root / "Manual" / "readme.txt").write_text("user note", encoding="utf-8")
 
-            payload = preview_orphan_metadata_dirs(root=tmp_dir)
+            with patch("app.services.strm_files.STRM_ROOT", str(root)):
+                payload = preview_orphan_metadata_dirs(root=tmp_dir)
 
             self.assertEqual([item["path"] for item in payload["candidates"]], ["Movie"])
             self.assertEqual([item["path"] for item in payload["empty_dirs"]], ["Empty"])
@@ -62,7 +64,8 @@ class StrmCleanupServiceTest(unittest.TestCase):
             (media_dir / "Movie.nfo").write_text("<movie />", encoding="utf-8")
 
             (media_dir / "Movie.strm").write_text("/strm/proxy?path=/115/Movie.mkv", encoding="utf-8")
-            result = delete_orphan_metadata_dirs(["Movie"], root=tmp_dir)
+            with patch("app.services.strm_files.STRM_ROOT", str(root)):
+                result = delete_orphan_metadata_dirs(["Movie"], root=tmp_dir)
 
             self.assertEqual(result["deleted_count"], 0)
             self.assertEqual(result["skipped_count"], 1)
@@ -75,7 +78,8 @@ class StrmCleanupServiceTest(unittest.TestCase):
             empty_dir.mkdir()
 
             (empty_dir / "note.txt").write_text("changed", encoding="utf-8")
-            result = delete_orphan_metadata_dirs(["Empty"], root=tmp_dir)
+            with patch("app.services.strm_files.STRM_ROOT", str(root)):
+                result = delete_orphan_metadata_dirs(["Empty"], root=tmp_dir)
 
             self.assertEqual(result["deleted_count"], 0)
             self.assertEqual(result["skipped_count"], 1)
@@ -87,11 +91,93 @@ class StrmCleanupServiceTest(unittest.TestCase):
             empty_dir = root / "Empty"
             empty_dir.mkdir()
 
-            result = delete_orphan_metadata_dirs(["Empty"], root=tmp_dir)
+            with patch("app.services.strm_files.STRM_ROOT", str(root)):
+                result = delete_orphan_metadata_dirs(["Empty"], root=tmp_dir)
 
             self.assertEqual(result["deleted_count"], 1)
             self.assertEqual(result["skipped_count"], 0)
             self.assertFalse(empty_dir.exists())
+
+    def test_orphan_metadata_preview_uses_custom_root(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            custom_root = root / "custom-strm"
+            custom_root.mkdir()
+            (custom_root / "Movie").mkdir()
+            (custom_root / "Movie" / "Movie.nfo").write_text("<movie />", encoding="utf-8")
+
+            with patch("app.services.strm_files.STRM_ROOT", str(custom_root)):
+                payload = preview_orphan_metadata_dirs(root=str(custom_root))
+
+            self.assertEqual(payload["root"], str(custom_root))
+            self.assertEqual([item["path"] for item in payload["candidates"]], ["Movie"])
+
+    def test_orphan_metadata_delete_uses_custom_root(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            custom_root = root / "custom-strm"
+            default_like_root = root / "default-strm"
+            custom_root.mkdir()
+            default_like_root.mkdir()
+            (custom_root / "Movie").mkdir()
+            (custom_root / "Movie" / "Movie.nfo").write_text("<movie />", encoding="utf-8")
+            (default_like_root / "Movie").mkdir()
+            (default_like_root / "Movie" / "Movie.nfo").write_text("<movie />", encoding="utf-8")
+
+            with patch("app.services.strm_files.STRM_ROOT", str(custom_root)):
+                result = delete_orphan_metadata_dirs(["Movie"], root=str(custom_root))
+
+            self.assertEqual(result["deleted_count"], 1)
+            self.assertFalse((custom_root / "Movie").exists())
+            self.assertTrue((default_like_root / "Movie").exists())
+
+    def test_orphan_metadata_rejects_filesystem_root_for_preview_and_delete(self):
+        with self.assertRaises(ValueError):
+            preview_orphan_metadata_dirs(root=os.path.sep)
+        with self.assertRaises(ValueError):
+            delete_orphan_metadata_dirs(["tmp"], root=os.path.sep)
+
+    def test_orphan_metadata_rejects_root_outside_default_strm_scope(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scope_root = Path(tmp_dir) / "strm"
+            outside_root = Path(tmp_dir) / "outside"
+            scope_root.mkdir()
+            outside_root.mkdir()
+            with patch("app.services.strm_files.STRM_ROOT", str(scope_root)):
+                with self.assertRaises(ValueError):
+                    preview_orphan_metadata_dirs(root=str(outside_root))
+                with self.assertRaises(ValueError):
+                    delete_orphan_metadata_dirs(["Movie"], root=str(outside_root))
+
+    def test_list_local_scan_dirs_returns_child_directories(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "A").mkdir()
+            (root / "B").mkdir()
+            (root / "file.txt").write_text("ignored", encoding="utf-8")
+
+            with patch("app.services.strm_files.STRM_ROOT", str(root)):
+                payload = list_local_scan_dirs(str(root))
+
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["path"], str(root))
+            self.assertEqual([item["name"] for item in payload["entries"]], ["A", "B"])
+            self.assertEqual(payload["entry_count"], 2)
+            self.assertTrue(payload["default_root"])
+
+    def test_list_local_scan_dirs_caps_parent_at_default_strm_scope(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scope_root = Path(tmp_dir) / "strm"
+            child_root = scope_root / "TV"
+            scope_root.mkdir()
+            child_root.mkdir()
+            (child_root / "Season 1").mkdir()
+            with patch("app.services.strm_files.STRM_ROOT", str(scope_root)):
+                root_payload = list_local_scan_dirs(str(scope_root))
+                child_payload = list_local_scan_dirs(str(child_root))
+
+            self.assertEqual(root_payload["parent"], "")
+            self.assertEqual(child_payload["parent"], str(scope_root))
 
     def test_monitor_task_sync_clean_compatibility(self):
         legacy_incremental = normalize_task({"name": "a", "incremental": True})

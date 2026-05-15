@@ -33,6 +33,25 @@ def _strm_root(root: Optional[str] = None) -> str:
     return os.path.abspath(str(root or STRM_ROOT))
 
 
+def _cleanup_scope_root() -> str:
+    return _strm_root(None)
+
+
+def _is_filesystem_root(path_abs: str) -> bool:
+    normalized = os.path.abspath(str(path_abs or ""))
+    return normalized == os.path.abspath(os.path.sep)
+
+
+def _validate_cleanup_root(root_abs: str, allow_filesystem_root: bool = False) -> None:
+    if not str(root_abs or "").strip():
+        raise ValueError("扫描根目录不能为空")
+    if not allow_filesystem_root and _is_filesystem_root(root_abs):
+        raise ValueError("扫描根目录不能是文件系统根目录，请选择更具体的媒体目录")
+    scope_root = _cleanup_scope_root()
+    if not _is_inside_root(scope_root, root_abs):
+        raise ValueError(f"扫描根目录必须位于默认 STRM 根目录内：{scope_root}")
+
+
 def _is_inside_root(root_abs: str, path_abs: str) -> bool:
     try:
         return os.path.commonpath([root_abs, path_abs]) == root_abs
@@ -258,8 +277,16 @@ def _collect_manual_check(summary: Dict[str, Any], output: List[Dict[str, Any]],
 
 def preview_orphan_metadata_dirs(root: Optional[str] = None) -> Dict[str, Any]:
     root_abs = _strm_root(root)
+    _validate_cleanup_root(root_abs)
     if not os.path.isdir(root_abs):
-        return {"ok": True, "root": root_abs, "candidates": [], "empty_dirs": [], "manual_check": []}
+        return {
+            "ok": True,
+            "root": root_abs,
+            "default_root": _cleanup_scope_root(),
+            "candidates": [],
+            "empty_dirs": [],
+            "manual_check": [],
+        }
     summary = _scan_dir(root_abs, root_abs)
     candidates: List[Dict[str, Any]] = []
     empty_dirs: List[Dict[str, Any]] = []
@@ -273,6 +300,7 @@ def preview_orphan_metadata_dirs(root: Optional[str] = None) -> Dict[str, Any]:
     return {
         "ok": True,
         "root": root_abs,
+        "default_root": _cleanup_scope_root(),
         "candidates": candidates,
         "empty_dirs": empty_dirs,
         "manual_check": manual_check,
@@ -294,6 +322,7 @@ def _resolve_cleanup_target(path: str, root_abs: str) -> str:
 
 def delete_orphan_metadata_dirs(paths: List[str], root: Optional[str] = None) -> Dict[str, Any]:
     root_abs = _strm_root(root)
+    _validate_cleanup_root(root_abs)
     deleted: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
     unique_paths = []
@@ -331,3 +360,44 @@ def delete_orphan_metadata_dirs(paths: List[str], root: Optional[str] = None) ->
         deleted.append(payload)
 
     return {"ok": True, "deleted": deleted, "skipped": skipped, "deleted_count": len(deleted), "skipped_count": len(skipped)}
+
+
+def list_local_scan_dirs(path: Optional[str] = None) -> Dict[str, Any]:
+    root_abs = _strm_root(path)
+    _validate_cleanup_root(root_abs, allow_filesystem_root=True)
+    scope_root = _cleanup_scope_root()
+    if not os.path.isdir(root_abs):
+        raise ValueError("目录不存在或不是文件夹")
+
+    entries: List[Dict[str, Any]] = []
+    try:
+        with os.scandir(root_abs) as iterator:
+            for entry in iterator:
+                try:
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    stat_result = entry.stat(follow_symlinks=False)
+                    entries.append(
+                        {
+                            "name": entry.name,
+                            "path": os.path.abspath(entry.path),
+                            "last_modified": _format_mtime(float(stat_result.st_mtime or 0.0)),
+                        }
+                    )
+                except OSError:
+                    continue
+    except OSError as exc:
+        raise ValueError(f"目录读取失败：{exc}") from exc
+
+    entries.sort(key=lambda item: str(item.get("name", "")).lower())
+    parent = os.path.dirname(root_abs)
+    if parent == root_abs or not _is_inside_root(scope_root, parent):
+        parent = ""
+    return {
+        "ok": True,
+        "path": root_abs,
+        "parent": parent,
+        "entries": entries,
+        "entry_count": len(entries),
+        "default_root": scope_root,
+    }
