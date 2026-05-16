@@ -1454,8 +1454,6 @@
             const tokens = [];
             const sourceName = String(item?.source_name || item?.channel_name || '频道资源').trim();
             if (sourceName) tokens.push(sourceName);
-            if (item?.year) tokens.push(String(item.year));
-            if (item?.quality) tokens.push(String(item.quality));
             const publishedRaw = item?.published_at || item?.created_at || '';
             const publishedMs = parseResourceTimeMs(publishedRaw);
             if (publishedMs) {

@@ -1,10 +1,10 @@
 {
-  "version": "0.3.28",
-  "buildDate": "2026-05-15T00:00:00+08:00",
+  "version": "0.3.29",
+  "buildDate": "2026-05-16T00:00:00+08:00",
   "notes": [
-    "更新版本号到 0.3.28",
-    "STRM 生成链接改为只写入服务地址与远端文件路径，不再携带 pickcode",
-    "按路径播放时默认刷新当前文件解析，避免同名替换后继续使用旧 pickcode"
+    "更新版本号到 0.3.29",
+    "统一文件管理列表的表头与名称列左对齐，减少资源、订阅、监控等目录选择场景的视觉错位",
+    "刮削页选择状态改为只显示数量，并优化竖屏操作按钮布局，避免长状态和按钮在窄屏下裁切"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

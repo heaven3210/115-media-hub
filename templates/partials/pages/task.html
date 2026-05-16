@@ -2,7 +2,7 @@
             <div class="group-card">
                 <h3 class="group-title mb-2">目录树同步</h3>
                 <div class="text-xs text-slate-400 leading-6">
-                    读取 115 官方目录树 TXT，生成受管 `.strm`；同步清理只删除过期 `.strm`。若目录里只剩空壳或刮削元数据，可用残留目录清理工具手动确认。
+                    读取官方目录树TXT文件，生成STRM文件。
                 </div>
             </div>
             <div class="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-2xl">
@@ -19,10 +19,10 @@
                 </div>
             </div>
             <div class="task-action-grid grid grid-cols-1 gap-4">
-                <button onclick="triggerTask(false, false)" class="btn-ctrl bg-sky-600 hover:bg-sky-500 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg text-white">🌐 联网增量写入</button>
-                <button onclick="triggerTask(true, false)" class="btn-ctrl bg-slate-700 hover:bg-slate-600 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg text-white">🛠 本地调试解析</button>
-                <button onclick="triggerTask(false, true)" class="btn-ctrl border-2 border-red-500/50 text-red-400 hover:bg-red-500/10 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg">🔥 强制全量重写</button>
-                <button onclick="openStrmCleanupTool()" class="task-cleanup-entry-btn p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg">
+                <button onclick="triggerTask(false, false)" class="task-action-btn btn-ctrl bg-sky-600 hover:bg-sky-500 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg text-white">🌐 联网增量写入</button>
+                <button onclick="triggerTask(true, false)" class="task-action-btn btn-ctrl bg-slate-700 hover:bg-slate-600 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg text-white">🛠 本地调试解析</button>
+                <button onclick="triggerTask(false, true)" class="task-action-btn btn-ctrl border-2 border-red-500/50 text-red-400 hover:bg-red-500/10 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg">🔥 强制全量重写</button>
+                <button onclick="openStrmCleanupTool()" class="task-action-btn task-cleanup-entry-btn bg-slate-700 hover:bg-slate-600 p-5 rounded-2xl font-bold transition-all active:scale-95 shadow-lg text-white">
                     清理 STRM 残留目录
                 </button>
             </div>

@@ -240,13 +240,14 @@
         let strmOrphanFilter = 'all';
         let strmOrphanSelectedPaths = new Set();
         let strmCleanupActiveRoot = '';
+        let strmCleanupConfirmedRoot = '';
         let strmCleanupDefaultRoot = '';
         let strmCleanupRootBrowserPath = '';
         let strmCleanupRootBrowserParent = '';
         let strmCleanupRootBrowserEntries = [];
         let strmCleanupRootBrowserBusy = false;
         let strmCleanupRootBrowserError = '';
-        let strmCleanupPanelMode = 'results';
+        let strmCleanupMainTab = 'browse';
         const DEFAULT_EXTENSIONS = "mp4,mkv,avi,mov,wmv,flv,webm,vob,mpg,mpeg,ts,m2ts,mts,rmvb,rm,asf,3gp,m4v,f4v,iso";
         const SENSITIVE_SETTING_FIELDS = Object.freeze([
             'password',
@@ -2080,8 +2081,44 @@
             input.value = String(value || '').trim();
         }
 
-        function isStrmCleanupRootPickerOpen() {
-            return strmCleanupPanelMode === 'browse';
+        function buildStrmCleanupPathSegments(path) {
+            const normalized = normalizeStrmCleanupRoot(path);
+            const defaultRoot = normalizeStrmCleanupRoot(strmCleanupDefaultRoot);
+            if (!normalized) return [];
+            const relative = defaultRoot && normalized.startsWith(defaultRoot)
+                ? normalized.slice(defaultRoot.length).replace(/^\/+/, '')
+                : '';
+            const segments = [];
+            if (defaultRoot) {
+                segments.push({ label: defaultRoot.split('/').filter(Boolean).pop() || defaultRoot || '/', path: defaultRoot });
+            } else {
+                segments.push({ label: normalized.split('/').filter(Boolean).pop() || normalized || '/', path: normalized });
+            }
+            if (!relative) return segments;
+            let current = defaultRoot || normalized;
+            relative.split('/').filter(Boolean).forEach((part) => {
+                current = `${current.replace(/\/+$/, '')}/${part}`;
+                segments.push({ label: part, path: current });
+            });
+            return segments;
+        }
+
+        function renderStrmCleanupPathbar(path = '') {
+            const pathbarEl = document.getElementById('strm-cleanup-root-pathbar');
+            if (!pathbarEl) return;
+            const targetPath = normalizeStrmCleanupRoot(path || getStrmCleanupRootInputValue() || strmCleanupRootBrowserPath || strmCleanupDefaultRoot);
+            if (!targetPath) {
+                pathbarEl.innerHTML = '<span class="strm-cleanup-root-pathbar-empty">未选择目录</span>';
+                return;
+            }
+            const segments = buildStrmCleanupPathSegments(targetPath);
+            pathbarEl.innerHTML = segments.map((segment, index) => {
+                const isLast = index === segments.length - 1;
+                const label = escapeHtml(segment.label || '--');
+                const button = `<button type="button" class="strm-cleanup-root-crumb ${isLast ? 'is-current' : ''}" data-strm-cleanup-root-path="${escapeHtml(segment.path)}" ${isLast ? 'aria-current="page"' : ''} onclick="openStrmCleanupRootChild(this.dataset.strmCleanupRootPath)">${label}</button>`;
+                const separator = isLast ? '' : '<span class="strm-cleanup-root-crumb-sep">/</span>';
+                return `${button}${separator}`;
+            }).join('');
         }
 
         function getStrmCleanupRequestedRoot() {
@@ -2090,6 +2127,14 @@
 
         function getStrmCleanupRequestedRootLabel() {
             return getStrmCleanupRequestedRoot() || strmCleanupDefaultRoot || '默认 STRM 目录';
+        }
+
+        function getStrmCleanupConfirmedRoot() {
+            return normalizeStrmCleanupRoot(strmCleanupConfirmedRoot);
+        }
+
+        function hasConfirmedStrmCleanupRoot() {
+            return !!getStrmCleanupConfirmedRoot();
         }
 
         function normalizeStrmCleanupRoot(root) {
@@ -2152,81 +2197,109 @@
             });
         }
 
+        function isStrmCleanupBrowseTabActive() {
+            return strmCleanupMainTab === 'browse';
+        }
+
         function updateStrmCleanupModeView() {
-            const browsing = isStrmCleanupRootPickerOpen();
             const browserPanel = document.getElementById('strm-cleanup-browser-panel');
             const resultsPanel = document.getElementById('strm-cleanup-results-panel');
-            const pickerBtn = document.getElementById('strm-cleanup-root-picker-btn');
-            const filterTabs = document.getElementById('strm-cleanup-filter-tabs');
-            if (browserPanel) browserPanel.classList.toggle('hidden', !browsing);
-            if (resultsPanel) resultsPanel.classList.toggle('hidden', browsing);
-            if (filterTabs) filterTabs.classList.toggle('hidden', browsing);
-            if (pickerBtn) {
-                pickerBtn.innerText = browsing ? '返回扫描结果' : '选择扫描路径';
-                pickerBtn.setAttribute('aria-pressed', browsing ? 'true' : 'false');
+            const browseTabBtn = document.getElementById('strm-cleanup-tab-browse');
+            const resultsTabBtn = document.getElementById('strm-cleanup-tab-results');
+            const browsing = isStrmCleanupBrowseTabActive();
+            const resultsLocked = !hasConfirmedStrmCleanupRoot();
+            if (browserPanel) {
+                browserPanel.classList.toggle('hidden', !browsing);
+                browserPanel.setAttribute('aria-hidden', browsing ? 'false' : 'true');
             }
+            if (resultsPanel) {
+                resultsPanel.classList.toggle('hidden', browsing);
+                resultsPanel.setAttribute('aria-hidden', browsing ? 'true' : 'false');
+            }
+            if (browseTabBtn) {
+                browseTabBtn.classList.toggle('is-active', browsing);
+                browseTabBtn.setAttribute('aria-selected', browsing ? 'true' : 'false');
+                browseTabBtn.tabIndex = browsing ? 0 : -1;
+            }
+            if (resultsTabBtn) {
+                resultsTabBtn.classList.toggle('is-active', !browsing);
+                resultsTabBtn.setAttribute('aria-selected', browsing ? 'false' : 'true');
+                resultsTabBtn.tabIndex = browsing ? -1 : 0;
+                resultsTabBtn.disabled = resultsLocked && browsing;
+                resultsTabBtn.classList.toggle('btn-disabled', resultsLocked && browsing);
+            }
+        }
+
+        function setStrmCleanupScopePanelExpanded(expanded, { loadBrowser = false } = {}) {
+            if (!expanded && !hasConfirmedStrmCleanupRoot()) {
+                showToast('请先在“选择目录”里确认待处理目录', {
+                    tone: 'warn',
+                    duration: 2200,
+                    placement: 'top-center'
+                });
+                strmCleanupMainTab = 'browse';
+                updateStrmCleanupModeView();
+                return;
+            }
+            strmCleanupMainTab = expanded ? 'browse' : 'results';
+            updateStrmCleanupModeView();
+            if (!expanded || !loadBrowser) return;
+            const targetPath = getStrmCleanupRequestedRoot() || strmCleanupRootBrowserPath || strmCleanupDefaultRoot;
+            if (targetPath) {
+                void loadStrmCleanupRootBrowser(targetPath);
+                return;
+            }
+            void ensureStrmCleanupDefaultRoot({ syncSelection: true, silent: true }).then((defaultRoot) => {
+                if (isStrmCleanupBrowseTabActive() && defaultRoot) {
+                    void loadStrmCleanupRootBrowser(defaultRoot);
+                }
+            });
         }
 
         function updateStrmCleanupScanButton() {
             const scanBtn = document.getElementById('strm-orphan-scan-btn');
             if (!scanBtn) return;
-            const disabled = strmOrphanScanBusy || isStrmCleanupRootPickerOpen();
+            const disabled = strmOrphanScanBusy || !hasConfirmedStrmCleanupRoot();
             scanBtn.disabled = disabled;
             scanBtn.classList.toggle('btn-disabled', disabled);
             if (strmOrphanScanBusy) {
                 scanBtn.innerText = '扫描中...';
                 return;
             }
-            scanBtn.innerText = '扫描残留目录';
+            if (!hasConfirmedStrmCleanupRoot()) {
+                scanBtn.innerText = '请先确认目录';
+                return;
+            }
+            scanBtn.innerText = strmOrphanHasScanned ? '重新扫描当前目录' : '扫描当前目录';
         }
 
         function isStrmCleanupRootChangedSinceScan() {
             if (!strmOrphanHasScanned) return false;
-            return getStrmCleanupComparableRequestedRoot() !== normalizeStrmCleanupRoot(strmCleanupActiveRoot);
+            return getStrmCleanupConfirmedRoot() !== normalizeStrmCleanupRoot(strmCleanupActiveRoot);
         }
 
         function updateStrmCleanupRootHint() {
-            const hintEl = document.getElementById('strm-cleanup-root-hint');
             const input = getStrmCleanupRootInput();
             if (input && strmCleanupDefaultRoot) {
                 input.placeholder = strmCleanupDefaultRoot;
             }
-            if (!hintEl) return;
             const requestedRoot = getStrmCleanupRequestedRoot() || strmCleanupDefaultRoot;
+            const confirmedRoot = getStrmCleanupConfirmedRoot();
             if (requestedRoot && !getStrmCleanupRequestedRoot()) {
                 setStrmCleanupRootInputValue(requestedRoot);
             }
-            if (isStrmCleanupRootPickerOpen()) {
-                hintEl.innerText = '正在选择扫描路径；选定后下方会恢复为扫描结果，需手动点击“扫描残留目录”。';
-                hintEl.classList.remove('is-warn');
-                return;
-            }
-            if (isStrmCleanupRootChangedSinceScan()) {
-                hintEl.innerText = '扫描根目录已变化，请先重新扫描，再勾选删除。';
-                hintEl.classList.add('is-warn');
-                return;
-            }
-            hintEl.classList.remove('is-warn');
-            if (strmCleanupActiveRoot && strmOrphanHasScanned) {
-                hintEl.innerText = `当前结果来自：${strmCleanupActiveRoot}`;
-                return;
-            }
-            hintEl.innerText = requestedRoot
-                ? `当前扫描路径：${requestedRoot}`
-                : '默认使用 STRM 根目录。点击“选择扫描路径”后，下方列表会临时切换成目录选择。';
-        }
-
-        function handleStrmCleanupRootInputChange() {
-            updateStrmCleanupRootHint();
-            updateOrphanMetadataSelection();
+            renderStrmCleanupPathbar(requestedRoot);
         }
 
         function renderStrmCleanupRootBrowser() {
-            const summaryEl = document.getElementById('strm-cleanup-root-browser-summary');
             const listEl = document.getElementById('strm-cleanup-root-browser-list');
             const parentBtn = document.getElementById('strm-cleanup-root-parent-btn');
             const refreshBtn = document.getElementById('strm-cleanup-root-refresh-btn');
             const useBtn = document.getElementById('strm-cleanup-root-use-btn');
+            const requestedRoot = getStrmCleanupComparableRequestedRoot();
+            const confirmedRoot = getStrmCleanupConfirmedRoot();
+            const activeRoot = normalizeStrmCleanupRoot(strmCleanupActiveRoot);
+            const rootChanged = isStrmCleanupRootChangedSinceScan();
             if (parentBtn) {
                 parentBtn.disabled = strmCleanupRootBrowserBusy || !strmCleanupRootBrowserParent;
                 parentBtn.classList.toggle('btn-disabled', parentBtn.disabled);
@@ -2236,20 +2309,12 @@
                 refreshBtn.classList.toggle('btn-disabled', refreshBtn.disabled);
             }
             if (useBtn) {
+                const alreadySelected = !!confirmedRoot && confirmedRoot === normalizeStrmCleanupRoot(strmCleanupRootBrowserPath);
                 useBtn.disabled = strmCleanupRootBrowserBusy || !strmCleanupRootBrowserPath;
                 useBtn.classList.toggle('btn-disabled', useBtn.disabled);
+                useBtn.innerText = alreadySelected ? '继续处理当前目录' : '确认目录并进入扫描处理';
             }
-            if (summaryEl) {
-                if (strmCleanupRootBrowserBusy) {
-                    summaryEl.innerText = '正在读取服务端本地目录...';
-                } else if (strmCleanupRootBrowserError) {
-                    summaryEl.innerText = strmCleanupRootBrowserError;
-                } else if (strmCleanupRootBrowserPath) {
-                    summaryEl.innerText = `${strmCleanupRootBrowserPath} · ${strmCleanupRootBrowserEntries.length} 个子目录`;
-                } else {
-                    summaryEl.innerText = '尚未读取目录';
-                }
-            }
+            renderStrmCleanupPathbar(strmCleanupRootBrowserPath || requestedRoot);
             if (!listEl) return;
             if (strmCleanupRootBrowserBusy && !strmCleanupRootBrowserEntries.length) {
                 listEl.innerHTML = '<div class="strm-cleanup-root-empty">正在读取目录...</div>';
@@ -2263,25 +2328,63 @@
                 listEl.innerHTML = '<div class="strm-cleanup-root-empty">当前目录下没有子目录，可以直接使用当前目录扫描。</div>';
                 return;
             }
-            listEl.innerHTML = strmCleanupRootBrowserEntries.map((entry) => {
+            const manager = window.MediaHubFileManager;
+            const entries = strmCleanupRootBrowserEntries.map((entry) => {
                 const path = String(entry?.path || '').trim();
                 const name = String(entry?.name || path || '--').trim();
                 const modified = String(entry?.last_modified || '') || '--';
-                return `
-                    <button type="button" class="strm-cleanup-root-row" data-strm-cleanup-root-path="${escapeHtml(path)}" onclick="openStrmCleanupRootChild(this.dataset.strmCleanupRootPath)">
-                        <span class="resource-browser-folder-icon strm-cleanup-folder-icon" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" focusable="false">
-                                <path fill="currentColor" d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.172c.597 0 1.169.237 1.591.659l1.078 1.078c.14.14.33.22.53.22H18A2.25 2.25 0 0 1 20.25 8.7v.6H3.75v-2.55Z"/>
-                                <path fill="currentColor" d="M3 10.8A1.8 1.8 0 0 1 4.8 9h14.4A1.8 1.8 0 0 1 21 10.8v4.95A3.75 3.75 0 0 1 17.25 19.5H6.75A3.75 3.75 0 0 1 3 15.75V10.8Z"/>
-                            </svg>
-                        </span>
-                        <span class="strm-cleanup-root-row-main">
-                            <span class="strm-cleanup-root-row-name">${escapeHtml(name)}</span>
-                            <span class="strm-cleanup-root-row-path">${escapeHtml(path)} · ${escapeHtml(modified)}</span>
-                        </span>
-                    </button>
-                `;
-            }).join('');
+                const normalizedPath = normalizeStrmCleanupRoot(path);
+                const isRequested = !!requestedRoot && requestedRoot === normalizedPath;
+                const isConfirmed = !!confirmedRoot && confirmedRoot === normalizedPath;
+                const badgeText = isConfirmed
+                    ? (!rootChanged && strmOrphanHasScanned && activeRoot === normalizedPath ? '当前扫描目录' : '已确认目录')
+                    : (isRequested ? '当前显示目录' : '');
+                return {
+                    ...entry,
+                    id: path,
+                    name,
+                    path,
+                    modified_at: modified,
+                    is_dir: true,
+                    is_current: isRequested || isConfirmed,
+                    secondaryText: badgeText,
+                };
+            });
+            const columns = [
+                {
+                    key: 'name',
+                    label: '名称',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--name',
+                    render: (entry) => manager.renderNameCell(entry, {
+                        nameHtml: `<span class="strm-cleanup-root-row-name" title="${escapeHtml(entry.path || entry.name || '')}">${escapeHtml(entry.name || '--')}</span>`,
+                        iconClass: 'strm-cleanup-folder-icon',
+                        mainClass: 'strm-cleanup-root-row-main',
+                    }),
+                },
+                {
+                    key: 'modified_at',
+                    label: '修改时间',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--modified',
+                    render: (entry) => escapeHtml(entry.modified_at || '--'),
+                },
+            ];
+            listEl.innerHTML = manager.renderTable({
+                entries,
+                columns,
+                sort: { key: 'name', direction: 'asc' },
+                sortable: true,
+                entryFilter: 'folders',
+                foldersFirst: true,
+                tableClass: 'strm-cleanup-root-manager',
+                emptyText: '当前目录下没有子目录，可以直接使用当前目录扫描。',
+                gridTemplate: 'minmax(220px, 1fr) 142px',
+                minWidth: '520px',
+                rowTag: 'button',
+                rowClass: (entry) => `strm-cleanup-root-row ${entry.is_current ? 'is-current' : ''}`,
+                rowAttrs: (entry) => `data-strm-cleanup-root-path="${escapeHtml(entry.path)}" onclick="openStrmCleanupRootChild(this.dataset.strmCleanupRootPath)"`,
+            });
         }
 
         async function loadStrmCleanupRootBrowser(path = '') {
@@ -2298,6 +2401,9 @@
                 strmCleanupRootBrowserParent = String(data?.parent || '').trim();
                 strmCleanupRootBrowserEntries = Array.isArray(data?.entries) ? data.entries : [];
                 if (data?.default_root) strmCleanupDefaultRoot = String(data.default_root || '').trim();
+                if (strmCleanupRootBrowserPath) {
+                    setStrmCleanupRootInputValue(strmCleanupRootBrowserPath);
+                }
             } catch (error) {
                 strmCleanupRootBrowserError = `目录读取失败：${error?.message || '请检查路径是否存在且可访问'}`;
                 strmCleanupRootBrowserPath = '';
@@ -2309,32 +2415,6 @@
                 updateStrmCleanupRootHint();
                 updateOrphanMetadataSelection();
             }
-        }
-
-        async function openStrmCleanupRootPicker() {
-            strmCleanupPanelMode = 'browse';
-            updateStrmCleanupModeView();
-            updateStrmCleanupRootHint();
-            updateStrmCleanupScanButton();
-            const fallbackRoot = await ensureStrmCleanupDefaultRoot({ syncSelection: true, silent: false });
-            const targetPath = getStrmCleanupRequestedRoot() || fallbackRoot;
-            void loadStrmCleanupRootBrowser(targetPath);
-        }
-
-        function closeStrmCleanupRootPicker() {
-            strmCleanupPanelMode = 'results';
-            updateStrmCleanupModeView();
-            updateStrmCleanupRootHint();
-            updateStrmCleanupScanButton();
-            updateOrphanMetadataSelection();
-        }
-
-        function toggleStrmCleanupRootPicker() {
-            if (isStrmCleanupRootPickerOpen()) {
-                closeStrmCleanupRootPicker();
-                return;
-            }
-            void openStrmCleanupRootPicker();
         }
 
         function openStrmCleanupRootChild(path) {
@@ -2352,30 +2432,38 @@
             void loadStrmCleanupRootBrowser(strmCleanupRootBrowserPath || getStrmCleanupRootInputValue());
         }
 
-        function useBrowsedStrmCleanupRoot() {
-            if (!strmCleanupRootBrowserPath) return;
-            setStrmCleanupRootInputValue(strmCleanupRootBrowserPath);
-            closeStrmCleanupRootPicker();
-            resetStrmCleanupResultsForPendingScan(strmCleanupRootBrowserPath);
+        async function confirmStrmCleanupRootSelection() {
+            const confirmedRoot = normalizeStrmCleanupRoot(strmCleanupRootBrowserPath || getStrmCleanupRequestedRoot() || strmCleanupDefaultRoot);
+            if (!confirmedRoot) {
+                showToast('请先在 STRM 根目录内选择一个待处理目录', {
+                    tone: 'warn',
+                    duration: 2600,
+                    placement: 'top-center'
+                });
+                return;
+            }
+            setStrmCleanupRootInputValue(confirmedRoot);
+            strmCleanupConfirmedRoot = confirmedRoot;
+            resetStrmCleanupResultsForPendingScan(confirmedRoot);
+            setStrmCleanupScopePanelExpanded(false);
+            renderStrmCleanupRootBrowser();
             updateStrmCleanupRootHint();
-            showToast('已选择扫描根目录，请点击“扫描残留目录”', {
+            updateOrphanMetadataSelection();
+            showToast('目录已确认，开始扫描当前目录', {
                 tone: 'success',
-                duration: 2200,
+                duration: 1800,
                 placement: 'top-center'
             });
+            await scanOrphanMetadataDirs();
         }
 
         async function resetStrmCleanupRoot() {
             const defaultRoot = await ensureStrmCleanupDefaultRoot({ syncSelection: true, silent: false });
             if (!defaultRoot) return;
             setStrmCleanupRootInputValue(defaultRoot);
-            strmCleanupRootBrowserPath = '';
-            strmCleanupRootBrowserParent = '';
-            strmCleanupRootBrowserEntries = [];
-            strmCleanupRootBrowserError = '';
-            closeStrmCleanupRootPicker();
-            resetStrmCleanupResultsForPendingScan(defaultRoot);
-            renderStrmCleanupRootBrowser();
+            if (isStrmCleanupBrowseTabActive() || !strmCleanupRootBrowserPath) {
+                await loadStrmCleanupRootBrowser(defaultRoot);
+            }
             updateStrmCleanupRootHint();
             updateOrphanMetadataSelection();
         }
@@ -2414,48 +2502,49 @@
         function updateOrphanMetadataSelection() {
             const selectedCount = getSelectedOrphanMetadataPaths().length;
             const rootChanged = isStrmCleanupRootChangedSinceScan();
-            const browsing = isStrmCleanupRootPickerOpen();
             const btn = document.getElementById('strm-orphan-delete-btn');
+            const visibleSelectablePaths = getSelectableOrphanPaths(getVisibleOrphanItems());
+            const checkedVisibleCount = visibleSelectablePaths.filter(path => strmOrphanSelectedPaths.has(path)).length;
             if (btn) {
-                btn.disabled = selectedCount <= 0 || strmOrphanScanBusy || rootChanged || browsing;
+                btn.disabled = selectedCount <= 0 || strmOrphanScanBusy || rootChanged;
                 btn.classList.toggle('btn-disabled', btn.disabled);
                 btn.innerText = rootChanged ? '请先重新扫描' : (selectedCount > 0 ? `删除选中 ${selectedCount} 项` : '删除选中');
             }
-            const visibleSelectablePaths = getSelectableOrphanPaths(getVisibleOrphanItems());
-            const checkedVisibleCount = visibleSelectablePaths.filter(path => strmOrphanSelectedPaths.has(path)).length;
             const checkAll = document.getElementById('strm-orphan-check-all');
             if (checkAll) {
-                checkAll.disabled = !visibleSelectablePaths.length || strmOrphanScanBusy || rootChanged || browsing;
+                checkAll.disabled = !visibleSelectablePaths.length || strmOrphanScanBusy || rootChanged;
                 checkAll.checked = visibleSelectablePaths.length > 0 && checkedVisibleCount === visibleSelectablePaths.length;
                 checkAll.indeterminate = checkedVisibleCount > 0 && checkedVisibleCount < visibleSelectablePaths.length;
             }
             document.querySelectorAll('.strm-orphan-checkbox').forEach(input => {
                 const path = String(input.value || '').trim();
                 input.checked = !!path && strmOrphanSelectedPaths.has(path);
-                input.disabled = strmOrphanScanBusy || rootChanged || browsing;
+                input.disabled = strmOrphanScanBusy || rootChanged;
             });
             updateStrmCleanupScanButton();
             updateStrmCleanupRootHint();
         }
 
         function closeStrmCleanupTool() {
-            closeStrmCleanupRootPicker();
+            setStrmCleanupScopePanelExpanded(true);
             hideLockedModal('strm-cleanup-modal');
         }
 
         function openStrmCleanupTool() {
+            setStrmCleanupScopePanelExpanded(true);
             updateStrmCleanupModeView();
             updateStrmCleanupRootHint();
             renderOrphanMetadataPreview(strmOrphanPreviewState, { preserveSelection: true });
             showLockedModal('strm-cleanup-modal');
             void ensureStrmCleanupDefaultRoot({ syncSelection: true, silent: true }).then((defaultRoot) => {
                 if (!defaultRoot) return;
+                const targetPath = getStrmCleanupRequestedRoot() || defaultRoot;
+                void loadStrmCleanupRootBrowser(targetPath);
                 if (!strmOrphanHasScanned && !getNormalizedOrphanItems().length) {
-                    resetStrmCleanupResultsForPendingScan(defaultRoot);
-                } else {
-                    updateStrmCleanupRootHint();
-                    updateOrphanMetadataSelection();
+                    resetStrmCleanupResultsForPendingScan(targetPath);
                 }
+                updateStrmCleanupRootHint();
+                updateOrphanMetadataSelection();
             });
         }
 
@@ -2475,7 +2564,35 @@
             } else {
                 strmOrphanSelectedPaths.delete(normalized);
             }
-            updateOrphanMetadataSelection();
+            renderOrphanMetadataPreview(strmOrphanPreviewState, { preserveSelection: true });
+        }
+
+        function selectVisibleOrphanMetadata() {
+            const paths = getSelectableOrphanPaths(getVisibleOrphanItems());
+            if (!paths.length) return;
+            paths.forEach(path => strmOrphanSelectedPaths.add(path));
+            renderOrphanMetadataPreview(strmOrphanPreviewState, { preserveSelection: true });
+        }
+
+        function clearSelectedOrphanMetadata() {
+            if (!strmOrphanSelectedPaths.size) return;
+            strmOrphanSelectedPaths = new Set();
+            renderOrphanMetadataPreview(strmOrphanPreviewState, { preserveSelection: true });
+        }
+
+        function handleOrphanRowClick(event, path) {
+            const target = event?.target;
+            if (target?.closest('input, button, a, label')) return;
+            const normalized = String(path || '').trim();
+            if (!normalized || strmOrphanScanBusy || isStrmCleanupRootChangedSinceScan()) return;
+            const selectable = new Set(getSelectableOrphanPaths());
+            if (!selectable.has(normalized)) return;
+            if (strmOrphanSelectedPaths.has(normalized)) {
+                strmOrphanSelectedPaths.delete(normalized);
+            } else {
+                strmOrphanSelectedPaths.add(normalized);
+            }
+            renderOrphanMetadataPreview(strmOrphanPreviewState, { preserveSelection: true });
         }
 
         function setVisibleOrphanMetadataChecked(checked) {
@@ -2542,15 +2659,30 @@
             }
             const items = getNormalizedOrphanItems();
             const visibleItems = getVisibleOrphanItems();
-            const metadataCount = strmOrphanPreviewState.candidates.length;
-            const emptyCount = strmOrphanPreviewState.empty_dirs.length;
-            const manualCount = strmOrphanPreviewState.manual_check.length;
+            const allSelectablePaths = getSelectableOrphanPaths(items);
+            const visibleSelectablePaths = getSelectableOrphanPaths(visibleItems);
+            const rootChanged = isStrmCleanupRootChangedSinceScan();
             const summaryEl = document.getElementById('strm-orphan-summary');
             const listEl = document.getElementById('strm-orphan-list');
             if (summaryEl) {
-                const rootText = strmOrphanPreviewState.root ? `扫描目录 ${strmOrphanPreviewState.root} · ` : '';
-                const scanningText = strmOrphanScanBusy ? '正在扫描...' : (strmOrphanHasScanned ? '扫描完成' : '尚未扫描');
-                summaryEl.innerText = `${rootText}${scanningText} · 仅剩元数据 ${metadataCount} 个 · 空文件夹 ${emptyCount} 个 · 需手动检查 ${manualCount} 个`;
+                if (strmOrphanScanBusy) {
+                    summaryEl.innerText = `正在扫描 ${getStrmCleanupRequestedRootLabel()}，请稍候...`;
+                } else if (!hasConfirmedStrmCleanupRoot()) {
+                    summaryEl.innerText = '请先确认待处理目录。';
+                } else if (!strmOrphanHasScanned && !items.length) {
+                    summaryEl.innerText = `待处理目录已确认：${getStrmCleanupConfirmedRoot()}。`;
+                } else {
+                    const selectedCount = getSelectedOrphanMetadataPaths().length;
+                    const activeRoot = strmOrphanPreviewState.root || getStrmCleanupRequestedRootLabel();
+                    if (rootChanged) {
+                        summaryEl.innerText = `目录已变更，请先重新扫描 ${getStrmCleanupRequestedRootLabel()}。`;
+                    } else if (!allSelectablePaths.length) {
+                        summaryEl.innerText = `已扫描 ${activeRoot}，当前没有可直接删除的目录。`;
+                    } else {
+                        const scopeLabel = strmOrphanFilter === 'all' ? '全部结果' : '当前筛选';
+                        summaryEl.innerText = `已扫描 ${activeRoot}，共 ${items.length} 项；${scopeLabel}可清理 ${visibleSelectablePaths.length} 项，已选 ${selectedCount} 项。`;
+                    }
+                }
             }
             renderStrmCleanupFilterCounts();
             updateStrmCleanupModeView();
@@ -2558,68 +2690,103 @@
                 updateOrphanMetadataSelection();
                 return;
             }
+            if (!hasConfirmedStrmCleanupRoot()) {
+                renderOrphanEmptyState(listEl, '先在“选择目录”里确认待处理目录。确认后会自动扫描并在这里显示结果。');
+                updateOrphanMetadataSelection();
+                return;
+            }
             if (!strmOrphanHasScanned && !items.length) {
-                renderOrphanEmptyState(listEl, '点击“扫描残留目录”开始扫描当前目录；如需切换路径，可点上方“选择扫描路径”。');
+                renderOrphanEmptyState(listEl, '正在等待扫描结果...');
                 updateOrphanMetadataSelection();
                 return;
             }
             if (!visibleItems.length) {
-                renderOrphanEmptyState(listEl, strmOrphanFilter === 'all' ? '没有发现 STRM 残留目录。' : '当前分类没有扫描结果。');
+                renderOrphanEmptyState(listEl, strmOrphanFilter === 'all' ? '没有发现 STRM 残留目录。' : '当前分类没有扫描结果，可以切换到其他分类查看。');
                 updateOrphanMetadataSelection();
                 return;
             }
-            listEl.innerHTML = visibleItems.map((item) => {
+            const manager = window.MediaHubFileManager;
+            const rows = visibleItems.map((item) => {
                 const path = String(item?.path || '');
                 const modified = String(item?.last_modified || '') || '--';
                 const kind = String(item.cleanup_kind || 'metadata');
                 const meta = getOrphanKindMeta(kind);
                 const checked = meta.selectable && strmOrphanSelectedPaths.has(path);
-                const rowClasses = [
-                    'resource-browser-row',
-                    'strm-cleanup-row',
-                    `strm-cleanup-row-${meta.tone}`,
-                    meta.selectable ? '' : 'is-readonly',
-                ].filter(Boolean).join(' ');
                 const checkboxHtml = meta.selectable
                     ? `<input type="checkbox" class="ui-checkbox ui-checkbox-sm strm-orphan-checkbox" value="${escapeHtml(path)}" onchange="toggleOrphanMetadataPath(this.value, this.checked)" ${checked ? 'checked' : ''}>`
                     : '<span class="strm-cleanup-readonly-marker" title="目录内含未知或非元数据文件，需要手动检查">!</span>';
                 const detailText = buildOrphanItemDetail(item);
-                return `
-                    <div class="${rowClasses}">
-                        <div class="resource-browser-name-cell strm-cleanup-name-cell">
-                            ${checkboxHtml}
-                            <span class="resource-browser-folder-icon strm-cleanup-folder-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24" focusable="false">
-                                    <path fill="currentColor" d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.172c.597 0 1.169.237 1.591.659l1.078 1.078c.14.14.33.22.53.22H18A2.25 2.25 0 0 1 20.25 8.7v.6H3.75v-2.55Z"/>
-                                    <path fill="currentColor" d="M3 10.8A1.8 1.8 0 0 1 4.8 9h14.4A1.8 1.8 0 0 1 21 10.8v4.95A3.75 3.75 0 0 1 17.25 19.5H6.75A3.75 3.75 0 0 1 3 15.75V10.8Z"/>
-                                </svg>
-                            </span>
-                            <div class="resource-browser-entry-main">
-                                <div>
-                                    <div class="resource-browser-entry-name">${escapeHtml(path || '--')}</div>
-                                    <div class="resource-browser-entry-sub">${escapeHtml(detailText)} · ${meta.selectable ? '可勾选后删除残留目录' : '含其他文件，仅提示手动检查'}</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="strm-cleanup-col-kind"><span class="strm-cleanup-kind strm-cleanup-kind-${meta.tone}">${escapeHtml(meta.label)}</span></div>
-                        <div class="strm-cleanup-col-detail">${escapeHtml(detailText)}</div>
-                        <div class="strm-cleanup-col-time">${escapeHtml(modified)}</div>
-                    </div>
-                `;
-            }).join('');
+                return {
+                    ...item,
+                    id: path,
+                    name: path || '--',
+                    path,
+                    modified_at: modified,
+                    is_dir: true,
+                    checked,
+                    selectable: meta.selectable,
+                    tone: meta.tone,
+                    kindLabel: meta.label,
+                    checkboxHtml,
+                    detailText,
+                };
+            });
+            const columns = [
+                {
+                    key: 'name',
+                    label: '目录路径',
+                    cellClass: 'file-manager-cell--name',
+                    render: (entry) => manager.renderNameCell(entry, {
+                        checkboxHtml: entry.checkboxHtml,
+                        nameHtml: `<span class="resource-browser-entry-name file-manager-entry-name" title="${escapeHtml(entry.path || '')}">${escapeHtml(entry.path || '--')}</span>`,
+                        iconClass: 'strm-cleanup-folder-icon',
+                        mainClass: 'resource-browser-entry-main',
+                    }),
+                },
+                {
+                    key: 'kind',
+                    label: '类型',
+                    cellClass: 'strm-cleanup-col-kind file-manager-cell--kind',
+                    render: (entry) => `<span class="strm-cleanup-kind strm-cleanup-kind-${escapeHtml(entry.tone)}">${escapeHtml(entry.kindLabel)}</span>`,
+                },
+                {
+                    key: 'detail',
+                    label: '内容',
+                    cellClass: 'strm-cleanup-col-detail',
+                    render: (entry) => escapeHtml(entry.detailText),
+                },
+                {
+                    key: 'modified_at',
+                    label: '修改时间',
+                    cellClass: 'strm-cleanup-col-time file-manager-cell--modified',
+                    render: (entry) => escapeHtml(entry.modified_at || '--'),
+                },
+            ];
+            listEl.innerHTML = manager.renderRows(rows, columns, {
+                emptyText: strmOrphanFilter === 'all' ? '没有发现 STRM 残留目录。' : '当前分类没有扫描结果，可以切换到其他分类查看。',
+                rowClass: (entry) => [
+                    'resource-browser-row',
+                    'strm-cleanup-row',
+                    `strm-cleanup-row-${entry.tone}`,
+                    entry.checked ? 'is-selected' : '',
+                    entry.selectable ? '' : 'is-readonly',
+                ].filter(Boolean).join(' '),
+                rowAttrs: (entry) => `data-strm-orphan-path="${escapeHtml(entry.path)}" onclick="handleOrphanRowClick(event, this.dataset.strmOrphanPath)" style="--file-manager-columns:minmax(0, 1.5fr) 138px minmax(220px, 0.9fr) 152px;--file-manager-min-width:760px"`,
+            });
             updateOrphanMetadataSelection();
         }
 
         async function scanOrphanMetadataDirs() {
             if (strmOrphanScanBusy) return;
-            const requestedRoot = getStrmCleanupRequestedRoot();
+            const requestedRoot = getStrmCleanupConfirmedRoot();
+            if (!requestedRoot) {
+                showToast('请先确认待处理目录', { tone: 'warn', duration: 2400, placement: 'top-center' });
+                return;
+            }
             strmOrphanScanBusy = true;
+            setStrmCleanupScopePanelExpanded(false);
             const summaryEl = document.getElementById('strm-orphan-summary');
             if (summaryEl) summaryEl.innerText = `正在扫描 ${requestedRoot || strmCleanupDefaultRoot || '默认 STRM 目录'} 的残留目录...`;
-            const scanBtn = document.getElementById('strm-orphan-scan-btn');
-            if (scanBtn) {
-                scanBtn.innerText = '扫描中...';
-            }
             updateOrphanMetadataSelection();
             try {
                 const data = await window.MediaHubApi.getJson(buildStrmCleanupPreviewUrl(requestedRoot));
@@ -3267,6 +3434,10 @@
             const summaryEl = document.getElementById('monitor-folder-summary');
             const refreshBtn = document.getElementById('monitor-folder-refresh-btn');
             if (!container) return;
+            const manager = window.MediaHubFileManager;
+            const renderEmpty = (message) => manager?.renderEmpty
+                ? manager.renderEmpty(message)
+                : `<div class="resource-browser-empty">${escapeHtml(message)}</div>`;
             if (refreshBtn) {
                 refreshBtn.disabled = monitorFolderLoading;
                 refreshBtn.classList.toggle('btn-disabled', monitorFolderLoading);
@@ -3278,16 +3449,66 @@
                 summaryEl.textContent = `当前目录下共有 ${folderCount} 个文件夹 / ${fileCount} 个文件，这里只展示文件夹，方便精确选择监控范围。`;
             }
             if (monitorFolderLoading && !monitorFolderEntries.length) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">正在读取 115 目录...</div>';
+                container.innerHTML = renderEmpty('正在读取 115 目录...');
                 return;
             }
             if (!monitorFolderEntries.length) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前目录下没有子文件夹，可以直接选择这里作为监控路径。</div>';
+                container.innerHTML = renderEmpty('当前目录下没有子文件夹，可以直接选择这里作为监控路径。');
                 return;
             }
-            container.innerHTML = monitorFolderEntries.map((entry) => (
-                buildResourceEntryRow(entry, { showOpenButton: true, openActionPrefix: 'monitor-folder' })
-            )).join('');
+            if (!manager?.renderTable) {
+                container.innerHTML = monitorFolderEntries.map((entry) => (
+                    buildResourceEntryRow(entry, { showOpenButton: true, openActionPrefix: 'monitor-folder' })
+                )).join('');
+                return;
+            }
+            const entries = monitorFolderEntries.filter(entry => !!entry?.is_dir).map(entry => ({
+                ...entry,
+                id: String(entry?.id || entry?.cid || entry?.path || entry?.name || '').trim(),
+                name: String(entry?.name || entry?.path || '--').trim() || '--',
+                modified_at: entry?.modified_at || entry?.last_modified || entry?.updated_at || entry?.time || '',
+                is_dir: true,
+            }));
+            const columns = [
+                {
+                    key: 'name',
+                    label: '名称',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--name',
+                    render: (entry) => manager.renderNameCell(entry, {
+                        nameHtml: `
+                            <button
+                                type="button"
+                                data-monitor-folder-action="open"
+                                data-monitor-folder-id="${escapeHtml(entry.id)}"
+                                data-monitor-folder-name="${escapeHtml(entry.name)}"
+                                class="resource-browser-link resource-browser-entry-name file-manager-entry-link"
+                                title="${escapeHtml(entry.path || entry.name || '')}"
+                            >${escapeHtml(entry.name || '--')}</button>
+                        `,
+                        mainClass: 'resource-browser-entry-main',
+                    }),
+                },
+                {
+                    key: 'modified_at',
+                    label: '修改时间',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--modified',
+                    render: (entry) => escapeHtml(manager.formatModified(entry.modified_at)),
+                },
+            ];
+            container.innerHTML = manager.renderTable({
+                entries,
+                columns,
+                sort: { key: 'name', direction: 'asc' },
+                sortable: true,
+                entryFilter: 'folders',
+                foldersFirst: true,
+                tableClass: 'file-manager-table-compact',
+                emptyText: '当前目录下没有子文件夹，可以直接选择这里作为监控路径。',
+                gridTemplate: 'minmax(220px, 1fr) 142px',
+                minWidth: '560px',
+            });
         }
 
         async function loadMonitorFolders(cid = '0', { forceRefresh = false } = {}) {

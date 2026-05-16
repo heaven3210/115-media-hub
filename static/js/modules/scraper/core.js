@@ -38,6 +38,10 @@ function $(id) {
     return document.getElementById(id);
 }
 
+function getFileManager() {
+    return window.MediaHubFileManager;
+}
+
 function escapeHtml(value) {
     if (typeof window.escapeHtml === 'function') return window.escapeHtml(value);
     return String(value || '')
@@ -153,9 +157,9 @@ function parseEntryModifiedMs(value) {
 
 function getEntryIcon(isDir) {
     if (isDir) {
-        return '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 8.5C4 7.67 4.67 7 5.5 7H9L10.5 8.5H18.5C19.33 8.5 20 9.17 20 10V16.5C20 17.33 19.33 18 18.5 18H5.5C4.67 18 4 17.33 4 16.5V8.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+        return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.75 6.75A2.25 2.25 0 0 1 6 4.5h3.172c.597 0 1.169.237 1.591.659l1.078 1.078c.14.14.33.22.53.22H18A2.25 2.25 0 0 1 20.25 8.7v.6H3.75v-2.55Z"/><path fill="currentColor" d="M3 10.8A1.8 1.8 0 0 1 4.8 9h14.4A1.8 1.8 0 0 1 21 10.8v4.95A3.75 3.75 0 0 1 17.25 19.5H6.75A3.75 3.75 0 0 1 3 15.75V10.8Z"/></svg>';
     }
-    return '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4.5H14L18 8.5V19.5H7V4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 4.5V8.5H18" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M7.5 3.75A2.25 2.25 0 0 0 5.25 6v12A2.25 2.25 0 0 0 7.5 20.25h9A2.25 2.25 0 0 0 18.75 18V8.56a2.25 2.25 0 0 0-.659-1.591l-2.56-2.56A2.25 2.25 0 0 0 13.94 3.75H7.5Z"/><path fill="rgba(15,23,42,0.18)" d="M14.25 3.9v3.6c0 .414.336.75.75.75h3.6"/></svg>';
 }
 
 function enrichEntry(entry) {
@@ -473,18 +477,22 @@ function renderSelection() {
     const hasPlan = planActions.length > 0;
     const hasBinding = !!(state.tmdb && Number(state.tmdb.tmdb_id || state.tmdb.id || 0) > 0);
     if (countEl) {
+        countEl.title = '';
         if (hasPlan) {
             const readyCount = planActions.filter(action => action.ready).length;
-            countEl.textContent = `预览 ${planActions.length} 项 / 可执行 ${readyCount} 项 / 已勾选 ${selectedReadyCount} 项`;
+            countEl.textContent = `已勾选 ${selectedReadyCount} 项`;
+            countEl.title = `预览 ${planActions.length} 项 / 可执行 ${readyCount} 项 / 已勾选 ${selectedReadyCount} 项`;
         } else {
             const count = selectedEntries.length;
             if (!count) {
                 countEl.textContent = '未选择条目';
             } else if (isWholeFolderSelection(selectedEntries)) {
-                countEl.textContent = `已选择整个文件夹：${selectedEntries[0].name || '--'}`;
+                countEl.textContent = `已选择 ${count} 项`;
+                countEl.title = `已选择整个文件夹：${selectedEntries[0].name || '--'}`;
             } else {
                 const hasFolder = selectedEntries.some(item => item.is_dir);
-                countEl.textContent = `已选择 ${count} 项 · 内容模式（只改文件名${hasFolder ? '，含子文件夹内文件' : ''}）`;
+                countEl.textContent = `已选择 ${count} 项`;
+                countEl.title = `内容模式（只改文件名${hasFolder ? '，含子文件夹内文件' : ''}）`;
             }
         }
     }
@@ -608,6 +616,7 @@ function renderMoveBuffer() {
 function renderEntries() {
     const list = $('scraper-entry-list');
     if (!list) return;
+    const manager = getFileManager();
     renderProviderStatus();
     renderBreadcrumbs();
     renderSelection();
@@ -620,6 +629,13 @@ function renderEntries() {
     const header = document.querySelector('.scraper-entry-header');
     const table = document.querySelector('.scraper-entry-table');
     const planActions = getPlanActions();
+    table?.classList.add('file-manager-table');
+    header?.classList.add('file-manager-header');
+    list.classList.add('file-manager-list');
+    if (table) {
+        table.style.setProperty('--file-manager-columns', 'minmax(220px, 1fr) 142px 110px');
+        table.style.setProperty('--file-manager-min-width', '680px');
+    }
     table?.classList.toggle('is-preview-mode', planActions.length > 0);
     if (planActions.length) {
         if (header) {
@@ -663,10 +679,10 @@ function renderEntries() {
         header.innerHTML = `
             <div class="scraper-entry-name-cell">
                 <input id="scraper-check-all" type="checkbox" class="ui-checkbox ui-checkbox-sm" aria-label="选择当前目录全部条目">
-                ${renderSortButton('name', '名称')}
+                ${manager.renderSortButton({ key: 'name', label: '名称' }, state.entrySort, { sortDataAttr: 'data-scraper-sort' })}
             </div>
-            ${renderSortButton('modified_at', '修改时间')}
-            ${renderSortButton('size', '大小')}
+            ${manager.renderSortButton({ key: 'modified_at', label: '修改时间' }, state.entrySort, { sortDataAttr: 'data-scraper-sort' })}
+            ${manager.renderSortButton({ key: 'size', label: '大小' }, state.entrySort, { sortDataAttr: 'data-scraper-sort' })}
         `;
         renderSelection();
     }
@@ -682,28 +698,39 @@ function renderEntries() {
         list.innerHTML = '<div class="scraper-empty-row">当前目录没有可显示条目。</div>';
         return;
     }
-    const rows = getDisplayEntries().map((entry) => {
-        const selected = state.selected.has(entry.id);
-        const entryTitle = escapeHtml(entry.path || entry.name || '');
-        const entryName = escapeHtml(entry.name || '--');
-        const nameHtml = entry.is_dir
-            ? `<button type="button" class="scraper-entry-link" data-scraper-entry-enter="${escapeHtml(entry.id)}" title="${entryTitle}" ${state.loading || state.navigationBusy ? 'disabled' : ''}>${entryName}</button>`
-            : `<span class="scraper-entry-filename" title="${entryTitle}">${entryName}</span>`;
-        return `
-            <div class="scraper-entry-row ${selected ? 'is-selected' : ''}" data-scraper-entry-id="${escapeHtml(entry.id)}">
-                <div class="scraper-entry-name-cell">
-                    <input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-check="${escapeHtml(entry.id)}" ${selected ? 'checked' : ''}>
-                    <span class="scraper-entry-icon ${entry.is_dir ? 'is-folder' : 'is-file'}">${getEntryIcon(entry.is_dir)}</span>
-                    <div class="scraper-entry-main">
-                        ${nameHtml}
-                    </div>
-                </div>
-                <span>${escapeHtml(formatTimeText(entry.modified_at))}</span>
-                <span>${entry.is_dir ? '--' : escapeHtml(formatFileSize(entry.size))}</span>
-            </div>
-        `;
+    const columns = [
+        {
+            key: 'name',
+            cellClass: 'file-manager-cell--name',
+            render: (entry) => {
+                const selected = state.selected.has(entry.id);
+                const entryTitle = escapeHtml(entry.path || entry.name || '');
+                const entryName = escapeHtml(entry.name || '--');
+                const nameHtml = entry.is_dir
+                    ? `<button type="button" class="scraper-entry-link" data-scraper-entry-enter="${escapeHtml(entry.id)}" title="${entryTitle}" ${state.loading || state.navigationBusy ? 'disabled' : ''}>${entryName}</button>`
+                    : `<span class="scraper-entry-filename" title="${entryTitle}">${entryName}</span>`;
+                return manager.renderNameCell(entry, {
+                    checkboxHtml: `<input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-check="${escapeHtml(entry.id)}" ${selected ? 'checked' : ''}>`,
+                    nameHtml,
+                });
+            },
+        },
+        {
+            key: 'modified_at',
+            cellClass: 'file-manager-cell--modified',
+            render: (entry) => escapeHtml(formatTimeText(entry.modified_at)),
+        },
+        {
+            key: 'size',
+            cellClass: 'file-manager-cell--size',
+            render: (entry) => entry.is_dir ? '--' : escapeHtml(formatFileSize(entry.size)),
+        },
+    ];
+    list.innerHTML = manager.renderRows(getDisplayEntries(), columns, {
+        emptyText: '当前目录没有可显示条目。',
+        isSelected: (entry) => state.selected.has(entry.id),
+        rowAttrs: (entry) => `data-scraper-entry-id="${escapeHtml(entry.id)}"`,
     });
-    list.innerHTML = rows.join('');
 }
 
 function getTmdbDisplayTitle(binding = state.tmdb) {
@@ -856,6 +883,13 @@ function syncFolderScopedControls() {
 }
 
 function getDisplayEntries() {
+    const manager = getFileManager();
+    if (manager?.sortEntries) {
+        return manager.sortEntries(state.entries, state.entrySort, {
+            foldersFirst: true,
+            entryFilter: 'all',
+        });
+    }
     const sortKey = ['name', 'size', 'modified_at'].includes(state.entrySort?.key) ? state.entrySort.key : 'name';
     const direction = state.entrySort?.direction === 'desc' ? -1 : 1;
     return state.entries.slice().sort((a, b) => {

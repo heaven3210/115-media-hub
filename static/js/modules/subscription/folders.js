@@ -1,3 +1,123 @@
+        function getSubscriptionFileManager() {
+            return window.MediaHubFileManager;
+        }
+
+        function getSubscriptionManagerEntryId(entry = {}) {
+            return String(entry?.id || entry?.cid || entry?.fid || entry?.pick_code || entry?.path || entry?.name || '').trim();
+        }
+
+        function getSubscriptionManagerEntryName(entry = {}) {
+            return String(entry?.name || entry?.file_name || entry?.path || '--').trim() || '--';
+        }
+
+        function getSubscriptionManagerModified(entry = {}) {
+            return entry?.modified_at || entry?.last_modified || entry?.updated_at || entry?.time || '';
+        }
+
+        function normalizeSubscriptionManagerEntry(entry = {}) {
+            return {
+                ...entry,
+                id: getSubscriptionManagerEntryId(entry),
+                name: getSubscriptionManagerEntryName(entry),
+                modified_at: getSubscriptionManagerModified(entry),
+                is_dir: !!entry?.is_dir,
+            };
+        }
+
+        function formatSubscriptionManagerSize(entry = {}) {
+            if (entry?.is_dir) return '--';
+            return typeof formatFileSizeText === 'function'
+                ? formatFileSizeText(entry?.size || 0)
+                : (getSubscriptionFileManager()?.formatFileSize(entry?.size || 0) || '--');
+        }
+
+        function renderSubscriptionManagerEmpty(message, className = '') {
+            const manager = getSubscriptionFileManager();
+            if (manager?.renderEmpty) return manager.renderEmpty(message, className);
+            return `<div class="resource-browser-empty ${escapeHtml(className)}">${escapeHtml(message)}</div>`;
+        }
+
+        function renderSubscriptionManagerTable(entries = [], {
+            openActionPrefix = 'subscription-folder',
+            entryFilter = 'all',
+            linkFolders = true,
+            showSize = true,
+            showActionColumn = false,
+            gridTemplate = 'minmax(220px, 1fr) 142px 96px 88px',
+            minWidth = '680px',
+            emptyText = '当前没有可显示条目。',
+        } = {}) {
+            const manager = getSubscriptionFileManager();
+            const normalizedPrefix = String(openActionPrefix || 'subscription-folder').replace(/[^a-z0-9-]/gi, '') || 'subscription-folder';
+            const normalizedEntries = (Array.isArray(entries) ? entries : []).map(normalizeSubscriptionManagerEntry);
+            if (!manager?.renderTable) {
+                return normalizedEntries.map(entry => buildResourceEntryRow(entry, {
+                    showOpenButton: showActionColumn,
+                    openActionPrefix: normalizedPrefix,
+                })).join('');
+            }
+            const columns = [
+                {
+                    key: 'name',
+                    label: '名称',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--name',
+                    render: (entry) => manager.renderNameCell(entry, {
+                        nameHtml: linkFolders && entry.is_dir
+                            ? `<button type="button" data-${normalizedPrefix}-action="open" data-${normalizedPrefix}-id="${escapeHtml(entry.id)}" data-${normalizedPrefix}-name="${escapeHtml(entry.name)}" class="resource-browser-link resource-browser-entry-name file-manager-entry-link" title="${escapeHtml(entry.path || entry.name || '')}">${escapeHtml(entry.name || '--')}</button>`
+                            : `<span class="resource-browser-entry-name file-manager-entry-name" title="${escapeHtml(entry.path || entry.name || '')}">${escapeHtml(entry.name || '--')}</span>`,
+                        mainClass: 'resource-browser-entry-main',
+                    }),
+                },
+                {
+                    key: 'modified_at',
+                    label: '修改时间',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--modified',
+                    render: (entry) => escapeHtml(manager.formatModified(getSubscriptionManagerModified(entry))),
+                },
+            ];
+            if (showSize) {
+                columns.push({
+                    key: 'size',
+                    label: '大小',
+                    sortable: true,
+                    cellClass: 'file-manager-cell--size',
+                    render: (entry) => escapeHtml(formatSubscriptionManagerSize(entry)),
+                });
+            }
+            if (showActionColumn) {
+                columns.push({
+                    key: 'action',
+                    label: '操作',
+                    cellClass: 'file-manager-cell--action',
+                    render: (entry) => entry.is_dir
+                        ? `
+                            <button
+                                type="button"
+                                data-${normalizedPrefix}-action="open"
+                                data-${normalizedPrefix}-id="${escapeHtml(entry.id)}"
+                                data-${normalizedPrefix}-name="${escapeHtml(entry.name)}"
+                                class="resource-entry-action file-manager-action-btn shrink-0"
+                            >进入</button>
+                        `
+                        : `<span class="resource-entry-flag shrink-0">${escapeHtml(formatSubscriptionManagerSize(entry))}</span>`,
+                });
+            }
+            return manager.renderTable({
+                entries: normalizedEntries,
+                columns,
+                sort: { key: 'name', direction: 'asc' },
+                sortable: true,
+                entryFilter,
+                foldersFirst: true,
+                tableClass: 'file-manager-table-compact',
+                emptyText,
+                gridTemplate,
+                minWidth,
+            });
+        }
+
         function renderSubscriptionFolderBreadcrumbs() {
             const container = document.getElementById('subscription-folder-breadcrumbs');
             if (!container) return;
@@ -43,18 +163,24 @@
                 summary.innerText = `当前目录下共有 ${Number(subscriptionFolderSummary?.folder_count || 0)} 个文件夹 / ${Number(subscriptionFolderSummary?.file_count || 0)} 个文件。`;
             }
             if (subscriptionFolderLoading) {
-                container.innerHTML = `<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">正在读取${escapeHtml(providerLabel)}目录...</div>`;
+                container.innerHTML = renderSubscriptionManagerEmpty(`正在读取${providerLabel}目录...`);
                 return;
             }
             const folders = (subscriptionFolderEntries || []).filter(entry => !!entry?.is_dir);
             if (!folders.length) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前目录没有子文件夹，可以直接选择这里作为保存位置。</div>';
+                container.innerHTML = renderSubscriptionManagerEmpty('当前目录没有子文件夹，可以直接选择这里作为保存位置。');
                 return;
             }
-            container.innerHTML = folders.map(entry => buildResourceEntryRow(entry, {
-                showOpenButton: true,
-                openActionPrefix: 'subscription-folder'
-            })).join('');
+            container.innerHTML = renderSubscriptionManagerTable(folders, {
+                openActionPrefix: 'subscription-folder',
+                entryFilter: 'folders',
+                linkFolders: true,
+                showSize: false,
+                showActionColumn: false,
+                gridTemplate: 'minmax(220px, 1fr) 142px',
+                minWidth: '560px',
+                emptyText: '当前目录没有子文件夹，可以直接选择这里作为保存位置。',
+            });
         }
 
         async function loadSubscriptionFolders(cid = '0', { forceRefresh = false } = {}) {
@@ -337,19 +463,19 @@
                     : counts;
             }
             if (subscriptionShareFolderLoading || currentFolderLoading) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">正在读取分享目录...</div>';
+                container.innerHTML = renderSubscriptionManagerEmpty('正在读取分享目录...');
                 return;
             }
             if (subscriptionShareFolderError) {
-                container.innerHTML = `<div class="rounded-2xl border border-dashed border-red-500/40 p-6 text-center text-red-300 text-sm">${escapeHtml(subscriptionShareFolderError)}</div>`;
+                container.innerHTML = renderSubscriptionManagerEmpty(subscriptionShareFolderError, 'text-red-300');
                 return;
             }
             if (!subscriptionShareFolderRootLoaded) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">点击“浏览链接目录”后，这里会显示分享内当前层级的目录和文件。</div>';
+                container.innerHTML = renderSubscriptionManagerEmpty('点击“浏览链接目录”后，这里会显示分享内当前层级的目录和文件。');
                 return;
             }
             if (!currentEntries.length) {
-                container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前目录没有可用条目，可以直接选择这里。</div>';
+                container.innerHTML = renderSubscriptionManagerEmpty('当前目录没有可用条目，可以直接选择这里。');
                 return;
             }
             const loadMoreHtml = currentFolderHasMore
@@ -364,10 +490,16 @@
                     </div>
                 `
                 : '';
-            container.innerHTML = `${currentEntries.map(entry => buildResourceEntryRow(entry, {
-                showOpenButton: true,
+            container.innerHTML = `${renderSubscriptionManagerTable(currentEntries, {
                 openActionPrefix: 'subscription-share-folder',
-            })).join('')}${loadMoreHtml}`;
+                entryFilter: 'all',
+                linkFolders: true,
+                showSize: true,
+                showActionColumn: false,
+                gridTemplate: 'minmax(220px, 1fr) 142px 96px',
+                minWidth: '620px',
+                emptyText: '当前目录没有可用条目，可以直接选择这里。',
+            })}${loadMoreHtml}`;
         }
 
         async function loadSubscriptionShareFolderBranch(

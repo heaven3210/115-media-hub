@@ -1,39 +1,244 @@
 (function (global) {
+    function getFileManager() {
+        return global.MediaHubFileManager;
+    }
+
+    function escapeValue(ctx, value) {
+        if (typeof ctx?.escapeHtml === 'function') return ctx.escapeHtml(value);
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+
+    function getEntryId(entry = {}) {
+        return String(entry?.id || entry?.cid || entry?.fid || entry?.pick_code || entry?.path || entry?.name || '').trim();
+    }
+
+    function getEntryName(entry = {}) {
+        return String(entry?.name || entry?.file_name || entry?.path || '--').trim() || '--';
+    }
+
+    function getEntryModified(entry = {}) {
+        return entry?.modified_at || entry?.last_modified || entry?.updated_at || entry?.time || '';
+    }
+
+    function normalizeManagerEntry(entry = {}) {
+        return {
+            ...entry,
+            id: getEntryId(entry),
+            name: getEntryName(entry),
+            modified_at: getEntryModified(entry),
+            is_dir: !!entry?.is_dir,
+        };
+    }
+
+    function formatEntrySize(ctx, entry = {}) {
+        if (entry?.is_dir) return '--';
+        if (typeof ctx?.formatFileSizeText === 'function') return ctx.formatFileSizeText(entry?.size || 0);
+        return getFileManager()?.formatFileSize(entry?.size || 0) || '--';
+    }
+
+    function renderManagerEmpty(ctx, message, className = '') {
+        const manager = getFileManager();
+        if (manager?.renderEmpty) return manager.renderEmpty(message, className);
+        return `<div class="resource-browser-empty ${escapeValue(ctx, className)}">${escapeValue(ctx, message)}</div>`;
+    }
+
+    function normalizeActionPrefix(prefix = 'resource-folder') {
+        return String(prefix || 'resource-folder').replace(/[^a-z0-9-]/gi, '') || 'resource-folder';
+    }
+
+    function buildOpenActionButton(ctx, entry = {}, {
+        openActionPrefix = 'resource-folder',
+        openActionName = 'open',
+        label = '进入',
+    } = {}) {
+        const normalized = normalizeManagerEntry(entry);
+        if (!normalized.is_dir) {
+            return `<span class="resource-entry-flag shrink-0">${escapeValue(ctx, formatEntrySize(ctx, normalized))}</span>`;
+        }
+        const prefix = normalizeActionPrefix(openActionPrefix);
+        return `
+            <button
+                type="button"
+                data-${prefix}-action="${escapeValue(ctx, openActionName)}"
+                data-${prefix}-id="${escapeValue(ctx, normalized.id)}"
+                data-${prefix}-name="${escapeValue(ctx, normalized.name)}"
+                class="resource-entry-action file-manager-action-btn shrink-0"
+            >${escapeValue(ctx, label)}</button>
+        `;
+    }
+
+    function buildManagerNameCell(ctx, entry = {}, {
+        checkboxHtml = '',
+        linkFolders = false,
+        openActionPrefix = 'resource-folder',
+        openActionName = 'open',
+    } = {}) {
+        const manager = getFileManager();
+        const normalized = normalizeManagerEntry(entry);
+        const title = escapeValue(ctx, normalized.path || normalized.name || '');
+        const name = escapeValue(ctx, normalized.name || '--');
+        const prefix = normalizeActionPrefix(openActionPrefix);
+        const nameHtml = linkFolders && normalized.is_dir
+            ? `<button type="button" data-${prefix}-action="${escapeValue(ctx, openActionName)}" data-${prefix}-id="${escapeValue(ctx, normalized.id)}" data-${prefix}-name="${name}" class="resource-browser-link resource-browser-entry-name file-manager-entry-link" title="${title}">${name}</button>`
+            : `<span class="resource-browser-entry-name file-manager-entry-name" title="${title}">${name}</span>`;
+        return manager.renderNameCell(normalized, {
+            checkboxHtml,
+            nameHtml,
+            mainClass: 'resource-browser-entry-main',
+        });
+    }
+
+    function buildManagerColumns(ctx, {
+        openActionPrefix = 'resource-folder',
+        openActionName = 'open',
+        linkFolders = false,
+        showActionColumn = false,
+        showModified = true,
+        showSize = true,
+        checkboxBuilder = null,
+    } = {}) {
+        const columns = [
+            {
+                key: 'name',
+                label: '名称',
+                sortable: true,
+                cellClass: 'file-manager-cell--name',
+                render: (entry) => buildManagerNameCell(ctx, entry, {
+                    checkboxHtml: typeof checkboxBuilder === 'function' ? checkboxBuilder(entry) : '',
+                    linkFolders,
+                    openActionPrefix,
+                    openActionName,
+                }),
+            },
+        ];
+        if (showModified) {
+            columns.push({
+                key: 'modified_at',
+                label: '修改时间',
+                sortable: true,
+                cellClass: 'file-manager-cell--modified',
+                render: (entry) => escapeValue(ctx, getFileManager().formatModified(getEntryModified(entry))),
+            });
+        }
+        if (showSize) {
+            columns.push({
+                key: 'size',
+                label: '大小',
+                sortable: true,
+                cellClass: 'file-manager-cell--size',
+                render: (entry) => escapeValue(ctx, formatEntrySize(ctx, entry)),
+            });
+        }
+        if (showActionColumn) {
+            columns.push({
+                key: 'action',
+                label: '操作',
+                cellClass: 'file-manager-cell--action',
+                render: (entry) => buildOpenActionButton(ctx, entry, { openActionPrefix, openActionName }),
+            });
+        }
+        return columns;
+    }
+
+    function renderManagerTable(ctx, entries = [], options = {}) {
+        const manager = getFileManager();
+        if (!manager?.renderTable) {
+            return (Array.isArray(entries) ? entries : [])
+                .map(entry => ctx.buildResourceEntryRow(entry, {
+                    showOpenButton: !!options.showActionColumn,
+                    openActionPrefix: options.openActionPrefix || 'resource-folder',
+                }))
+                .join('');
+        }
+        const columns = options.columns || buildManagerColumns(ctx, options);
+        return manager.renderTable({
+            entries: (Array.isArray(entries) ? entries : []).map(normalizeManagerEntry),
+            columns,
+            sort: options.sort || { key: 'name', direction: 'asc' },
+            sortable: options.sortable !== false,
+            entryFilter: options.entryFilter || 'all',
+            foldersFirst: options.foldersFirst !== false,
+            tableClass: options.tableClass || 'file-manager-table-compact',
+            emptyText: options.emptyText || '当前没有可显示条目。',
+            gridTemplate: options.gridTemplate || 'minmax(220px, 1fr) 142px 96px 88px',
+            minWidth: options.minWidth || '680px',
+            rowAttrs: options.rowAttrs || '',
+        });
+    }
+
     function buildResourceShareRows(ctx, entries) {
-        return (Array.isArray(entries) ? entries : []).map(entry => {
+        const manager = getFileManager();
+        if (!manager?.renderRows) {
+            return (Array.isArray(entries) ? entries : []).map(entry => {
+                const normalized = ctx.buildResourceShareSelectableEntry(entry);
+                const directSelected = !!ctx.resourceShareSelected[normalized.id];
+                const coveredByAncestor = !directSelected ? ctx.getResourceShareCoveredAncestor(normalized) : null;
+                const effectiveSelected = directSelected || !!coveredByAncestor;
+                return `
+                    <div class="resource-browser-row">
+                        <div class="resource-browser-name-cell">
+                            <input
+                                type="checkbox"
+                                data-resource-share-check="1"
+                                data-resource-share-id="${ctx.escapeHtml(normalized.id)}"
+                                class="ui-checkbox ui-checkbox-sm"
+                                ${effectiveSelected ? 'checked' : ''}
+                                ${coveredByAncestor ? 'disabled' : ''}
+                            >
+                            <div class="resource-browser-entry-main">
+                                <span class="${normalized.is_dir ? 'resource-browser-folder-icon' : 'resource-browser-file-icon'}">${ctx.getResourceIconSvg(normalized.is_dir ? 'folder' : 'file')}</span>
+                                <div class="min-w-0">
+                                    ${normalized.is_dir
+                                        ? `<button type="button" data-resource-share-action="enter" data-resource-share-id="${ctx.escapeHtml(normalized.id)}" class="resource-browser-link resource-browser-entry-name">${ctx.escapeHtml(normalized.name || '--')}</button>`
+                                        : `<div class="resource-browser-entry-name">${ctx.escapeHtml(normalized.name || '--')}</div>`
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="resource-browser-col-size">${normalized.is_dir ? '--' : ctx.escapeHtml(ctx.formatFileSizeText(entry?.size || 0))}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        const normalizedEntries = (Array.isArray(entries) ? entries : []).map(entry => {
             const normalized = ctx.buildResourceShareSelectableEntry(entry);
             const directSelected = !!ctx.resourceShareSelected[normalized.id];
             const coveredByAncestor = !directSelected ? ctx.getResourceShareCoveredAncestor(normalized) : null;
             const effectiveSelected = directSelected || !!coveredByAncestor;
-            const noteText = coveredByAncestor
-                ? `已由上级目录“${coveredByAncestor.name}”一并选择`
-                : '';
-            return `
-                <div class="resource-browser-row">
-                    <div class="resource-browser-name-cell">
-                        <input
-                            type="checkbox"
-                            data-resource-share-check="1"
-                            data-resource-share-id="${ctx.escapeHtml(normalized.id)}"
-                            class="ui-checkbox ui-checkbox-sm"
-                            ${effectiveSelected ? 'checked' : ''}
-                            ${coveredByAncestor ? 'disabled' : ''}
-                        >
-                        <div class="resource-browser-entry-main">
-                            <span class="${normalized.is_dir ? 'resource-browser-folder-icon' : 'resource-browser-file-icon'}">${ctx.getResourceIconSvg(normalized.is_dir ? 'folder' : 'file')}</span>
-                            <div class="min-w-0">
-                                ${normalized.is_dir
-                                    ? `<button type="button" data-resource-share-action="enter" data-resource-share-id="${ctx.escapeHtml(normalized.id)}" class="resource-browser-link resource-browser-entry-name">${ctx.escapeHtml(normalized.name || '--')}</button>`
-                                    : `<div class="resource-browser-entry-name">${ctx.escapeHtml(normalized.name || '--')}</div>`
-                                }
-                                ${noteText ? `<div class="resource-browser-entry-sub">${ctx.escapeHtml(noteText)}</div>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="resource-browser-col-size">${normalized.is_dir ? '--' : ctx.escapeHtml(ctx.formatFileSizeText(entry?.size || 0))}</div>
-                </div>
-            `;
-        }).join('');
+            return normalizeManagerEntry({
+                ...entry,
+                ...normalized,
+                resourceShareEffectiveSelected: effectiveSelected,
+                resourceShareCovered: !!coveredByAncestor,
+            });
+        });
+        const columns = buildManagerColumns(ctx, {
+            showModified: false,
+            showSize: true,
+            linkFolders: true,
+            openActionPrefix: 'resource-share',
+            openActionName: 'enter',
+            checkboxBuilder: (entry) => `
+                <input
+                    type="checkbox"
+                    data-resource-share-check="1"
+                    data-resource-share-id="${escapeValue(ctx, entry.id)}"
+                    class="ui-checkbox ui-checkbox-sm"
+                    ${entry.resourceShareEffectiveSelected ? 'checked' : ''}
+                    ${entry.resourceShareCovered ? 'disabled' : ''}
+                >
+            `,
+        });
+        return manager.renderRows(normalizedEntries, columns, {
+            emptyText: '这个目录下暂时没有可转存的内容。',
+            rowClass: 'resource-browser-row',
+            rowAttrs: 'style="--file-manager-columns:minmax(0, 1fr) 96px;--file-manager-min-width:520px"',
+        });
     }
 
     function renderResourceShareBrowser(ctx) {
@@ -218,12 +423,12 @@
             }
         }
         if (ctx.resourceFolderLoading && !ctx.resourceFolderEntries.length) {
-            container.innerHTML = `<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">正在读取${ctx.escapeHtml(providerLabel)}目录...</div>`;
+            container.innerHTML = renderManagerEmpty(ctx, `正在读取${providerLabel}目录...`);
             return;
         }
         const entries = Array.isArray(ctx.resourceFolderEntries) ? ctx.resourceFolderEntries : [];
         if (!entries.length && Number(ctx.resourceFolderSummary?.file_count || 0) <= 0) {
-            container.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前目录为空，可以直接选择这里作为保存位置。</div>';
+            container.innerHTML = renderManagerEmpty(ctx, '当前目录为空，可以直接选择这里作为保存位置。');
             return;
         }
         const folders = [];
@@ -233,7 +438,19 @@
             else files.push(entry);
         }
         if (!ctx.resourceFolderEntriesComplete) {
-            const lines = folders.map(entry => ctx.buildResourceEntryRow(entry, { showOpenButton: true }));
+            const lines = [];
+            if (folders.length) {
+                lines.push(renderManagerTable(ctx, folders, {
+                    entryFilter: 'folders',
+                    linkFolders: true,
+                    showActionColumn: false,
+                    showSize: false,
+                    openActionPrefix: 'resource-folder',
+                    gridTemplate: 'minmax(220px, 1fr) 142px',
+                    minWidth: '560px',
+                    emptyText: '当前目录没有子文件夹。',
+                }));
+            }
             const fileCount = Number(ctx.resourceFolderSummary?.file_count || 0);
             if (ctx.resourceFolderFilesLoading) {
                 lines.push('<div class="rounded-2xl border border-dashed border-slate-700 px-4 py-3 text-[12px] text-slate-400">目录已可操作，正在后台补充文件预览...</div>');
@@ -254,7 +471,14 @@
         const shouldTrimFiles = !ctx.resourceFolderShowAllFiles && files.length > ctx.RESOURCE_FOLDER_FILE_PREVIEW_LIMIT;
         const visibleFiles = shouldTrimFiles ? files.slice(0, ctx.RESOURCE_FOLDER_FILE_PREVIEW_LIMIT) : files;
         const visibleEntries = folders.concat(visibleFiles);
-        const lines = visibleEntries.map(entry => ctx.buildResourceEntryRow(entry, { showOpenButton: true }));
+        const lines = [renderManagerTable(ctx, visibleEntries, {
+            linkFolders: true,
+            showActionColumn: false,
+            openActionPrefix: 'resource-folder',
+            gridTemplate: 'minmax(220px, 1fr) 142px 96px',
+            minWidth: '620px',
+            emptyText: '当前目录为空，可以直接选择这里作为保存位置。',
+        })];
         if (ctx.resourceFolderFilesLoading) {
             lines.push('<div class="rounded-2xl border border-dashed border-slate-700 px-4 py-3 text-[12px] text-slate-400">目录已可操作，正在后台补充文件列表...</div>');
         }
@@ -301,31 +525,36 @@
         pathEl.innerText = document.getElementById('resource_job_folder_path')?.value?.trim() || '根目录';
         if (!ctx.isProviderCookieConfigured(provider)) {
             summaryEl.innerText = `配置${providerLabel} Cookie 后可预览目标目录下的文件夹和文件内容。`;
-            listEl.innerHTML = `<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前未配置${ctx.escapeHtml(providerLabel)} Cookie，暂时无法读取目标目录内容。</div>`;
+            listEl.innerHTML = renderManagerEmpty(ctx, `当前未配置${providerLabel} Cookie，暂时无法读取目标目录内容。`);
             return;
         }
         if (ctx.resourceTargetPreviewLoading) {
             summaryEl.innerText = '正在读取目标目录内容...';
-            listEl.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">正在加载目标目录内容...</div>';
+            listEl.innerHTML = renderManagerEmpty(ctx, '正在加载目标目录内容...');
             return;
         }
         if (ctx.resourceTargetPreviewError) {
             summaryEl.innerText = '目标目录内容读取失败';
-            listEl.innerHTML = `<div class="rounded-2xl border border-dashed border-red-500/20 bg-red-500/10 p-6 text-center text-red-300 text-sm">${ctx.escapeHtml(ctx.resourceTargetPreviewError)}</div>`;
+            listEl.innerHTML = renderManagerEmpty(ctx, ctx.resourceTargetPreviewError, 'text-red-300');
             return;
         }
         const folderCount = Number(ctx.resourceTargetPreviewSummary?.folder_count || 0);
         const fileCount = Number(ctx.resourceTargetPreviewSummary?.file_count || 0);
         summaryEl.innerText = `当前目录下共有 ${folderCount} 个文件夹 / ${fileCount} 个文件。`;
         if (!ctx.resourceTargetPreviewEntries.length) {
-            listEl.innerHTML = '<div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">当前目录为空，你可以直接把资源保存到这里。</div>';
+            listEl.innerHTML = renderManagerEmpty(ctx, '当前目录为空，你可以直接把资源保存到这里。');
             return;
         }
         const entries = Array.isArray(ctx.resourceTargetPreviewEntries) ? ctx.resourceTargetPreviewEntries : [];
         const folders = entries.filter(entry => !!entry?.is_dir);
         const files = entries.filter(entry => !entry?.is_dir);
         const visibleEntries = folders.concat(files.slice(0, ctx.RESOURCE_FOLDER_FILE_PREVIEW_LIMIT));
-        let html = visibleEntries.map(entry => ctx.buildResourceEntryRow(entry)).join('');
+        let html = renderManagerTable(ctx, visibleEntries, {
+            showActionColumn: false,
+            gridTemplate: 'minmax(220px, 1fr) 142px 96px',
+            minWidth: '620px',
+            emptyText: '当前目录为空，你可以直接把资源保存到这里。',
+        });
         if (files.length > ctx.RESOURCE_FOLDER_FILE_PREVIEW_LIMIT) {
             html += `<div class="resource-browser-hint-card rounded-2xl border border-slate-700/60 bg-slate-900/40 px-4 py-3 text-[12px] text-slate-300">为保证加载速度，预览默认仅显示前 ${ctx.RESOURCE_FOLDER_FILE_PREVIEW_LIMIT} 个文件。</div>`;
         }
