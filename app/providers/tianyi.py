@@ -43,7 +43,10 @@ class TianyiProvider(CloudProvider):
                 timeout=15,
             )
             resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except (ValueError, requests.JSONDecodeError):
+                raise RuntimeError("天翼云盘返回数据异常")
             token = data.get("accessToken") or data.get("access_token")
             if not token:
                 raise RuntimeError("天翼云盘 AccessToken 获取失败，请检查 Cookie 是否有效")
@@ -80,7 +83,12 @@ class TianyiProvider(CloudProvider):
             timeout=30,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, requests.JSONDecodeError):
+            raise RuntimeError("天翼云盘返回数据异常")
+        if data.get("res_code") != 0:
+            raise RuntimeError(f"天翼云盘读取目录失败: {data.get('res_msg', '')}")
         entries = []
         for item in data.get("data", {}).get("items", []):
             is_dir = bool(item.get("isFolder"))
@@ -95,9 +103,15 @@ class TianyiProvider(CloudProvider):
                 "size": int(item.get("fileSize", 0) or 0),
                 "parent_id": cid or "0",
             })
+        folder_count = sum(1 for e in entries if e.get("is_dir"))
+        file_count = sum(1 for e in entries if not e.get("is_dir"))
         return {
             "entries": entries,
             "total": data.get("data", {}).get("total", len(entries)),
+            "summary": {
+                "folder_count": folder_count,
+                "file_count": file_count,
+            },
         }
 
     def list_entries(self, cookie, cid="0"):
@@ -116,7 +130,10 @@ class TianyiProvider(CloudProvider):
             timeout=15,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, requests.JSONDecodeError):
+            raise RuntimeError("天翼云盘返回数据异常")
         if data.get("res_code") != 0:
             raise RuntimeError(f"天翼云盘创建文件夹失败: {data.get('res_msg', '')}")
         return {"cid": str(data.get("fileId", "")), "name": folder_name}
@@ -171,7 +188,12 @@ class TianyiProvider(CloudProvider):
             timeout=30,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, requests.JSONDecodeError):
+            raise RuntimeError("天翼云盘返回数据异常")
+        if data.get("res_code") != 0:
+            raise RuntimeError(f"天翼云盘读取分享目录失败: {data.get('res_msg', '')}")
         entries = []
         for item in data.get("data", {}).get("items", []):
             is_dir = bool(item.get("isFolder"))
@@ -187,10 +209,16 @@ class TianyiProvider(CloudProvider):
                 "parent_id": cid or "0",
                 "share_id": share_code,
             })
+        folder_count = sum(1 for e in entries if e.get("is_dir"))
+        file_count = sum(1 for e in entries if not e.get("is_dir"))
         return {
             "entries": entries,
             "total": data.get("data", {}).get("total", len(entries)),
-            "share": share_payload,
+            "share_title": str(data.get("data", {}).get("shareName", "") or "").strip(),
+            "summary": {
+                "folder_count": folder_count,
+                "file_count": file_count,
+            },
         }
 
     def prepare_share_receive(self, cookie, share_payload, cid="0"):
@@ -221,7 +249,10 @@ class TianyiProvider(CloudProvider):
             timeout=60,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, requests.JSONDecodeError):
+            raise RuntimeError("天翼云盘返回数据异常")
         if data.get("res_code") != 0:
             raise RuntimeError(f"天翼云盘转存失败: {data.get('res_msg', '')}")
         return {"success": True, "count": len(file_ids)}
@@ -247,7 +278,10 @@ class TianyiProvider(CloudProvider):
             timeout=30,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except (ValueError, requests.JSONDecodeError):
+            raise RuntimeError("天翼云盘返回数据异常")
         if data.get("res_code") != 0:
             raise RuntimeError(f"天翼云盘重命名失败: {data.get('res_msg', '')}")
         return {"ok": True, "id": str(entry_id), "name": str(new_name)}
@@ -268,7 +302,10 @@ class TianyiProvider(CloudProvider):
                 timeout=30,
             )
             resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except (ValueError, requests.JSONDecodeError):
+                raise RuntimeError("天翼云盘返回数据异常")
             if data.get("res_code") != 0:
                 raise RuntimeError(f"天翼云盘移动失败: {data.get('res_msg', '')}")
         return {"ok": True, "ids": entry_ids, "target_cid": target_id}
@@ -289,7 +326,10 @@ class TianyiProvider(CloudProvider):
                 timeout=30,
             )
             resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except (ValueError, requests.JSONDecodeError):
+                raise RuntimeError("天翼云盘返回数据异常")
             if data.get("res_code") != 0:
                 raise RuntimeError(f"天翼云盘复制失败: {data.get('res_msg', '')}")
         return {"ok": True, "ids": entry_ids, "target_cid": target_id}
@@ -311,7 +351,10 @@ class TianyiProvider(CloudProvider):
             # 天翼云盘删除成功返回空 body
             if not resp.text.strip():
                 continue
-            data = resp.json()
+            try:
+                data = resp.json()
+            except (ValueError, requests.JSONDecodeError):
+                raise RuntimeError("天翼云盘返回数据异常")
             if data.get("res_code") != 0:
                 raise RuntimeError(f"天翼云盘删除失败: {data.get('res_msg', '')}")
         return {"ok": True, "ids": entry_ids}
