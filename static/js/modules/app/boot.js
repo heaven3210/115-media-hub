@@ -113,9 +113,19 @@
                 if (typeof renderProviderFilterButtons === 'function') {
                     renderProviderFilterButtons();
                 }
+                if (typeof populateSubscriptionProviderSelect === 'function') {
+                    populateSubscriptionProviderSelect();
+                }
+                // 确保 settings 模块已加载，否则 renderProviderAuthBlocks 未挂载到 window
+                try {
+                    await import('/static/js/modules/tabs/settings.js');
+                } catch (_) { /* settings module may load via other path */ }
                 const sensitiveMeta = normalizeSensitiveConfigMeta(cfg.sensitive_configured || {});
                 if (typeof renderProviderAuthBlocks === 'function') {
                     renderProviderAuthBlocks(cfg, sensitiveMeta);
+                }
+                if (typeof renderCookieHealthBar === 'function') {
+                    renderCookieHealthBar(cfg.cookie_health || {});
                 }
                 if (typeof setAppMountPoints === 'function') {
                     setAppMountPoints(cfg.mount_points || []);
@@ -148,18 +158,28 @@
 
                 applyMonitorState({ ...monitorState, tasks: cfg.monitor_tasks || [] }, { forceRender: true });
                 applySubscriptionState({ ...subscriptionState, tasks: cfg.subscription_tasks || [] }, { forceRender: true });
-                applyResourceState({
+                const dynamicFavDirs = { '115': [], quark: [] };
+                const dynamicCookieConfigured = {};
+                const meta = window.providerMeta || [];
+                meta.forEach(p => {
+                    dynamicFavDirs[p.name] = [];
+                    const cookieKey = p.config_keys[0] || ('cookie_' + p.name);
+                    dynamicCookieConfigured['cookie_configured_' + p.name] = !!sensitiveMeta[cookieKey];
+                });
+                const resourceStateUpdates = {
                     ...resourceState,
                     sources: cfg.resource_sources || [],
                     quick_links: cfg.resource_quick_links || [],
-                    favorite_dirs: cfg.resource_favorite_dirs || { '115': [], quark: [] },
+                    favorite_dirs: cfg.resource_favorite_dirs || dynamicFavDirs,
                     monitor_tasks: cfg.monitor_tasks || [],
                     cookie_configured: !!sensitiveMeta.cookie_115,
                     quark_cookie_configured: !!sensitiveMeta.cookie_quark,
                     cookie_health: cfg.cookie_health && typeof cfg.cookie_health === 'object'
                         ? cfg.cookie_health
                         : (resourceState.cookie_health || null)
-                });
+                };
+                Object.assign(resourceStateUpdates, dynamicCookieConfigured);
+                applyResourceState(resourceStateUpdates);
                 applySign115State({
                     ...sign115State,
                     enabled: !!cfg.sign115_enabled,
