@@ -793,6 +793,7 @@ def default_config() -> Dict[str, Any]:
         "cookie_115": "",
         "cookie_quark": "",
         "provider_enabled": _build_provider_enabled_defaults(),
+        "default_magnet_provider": "115",
         "sign115_enabled": False,
         "sign115_cron_time": "09:00",
         "tg_proxy_enabled": False,
@@ -922,6 +923,17 @@ def normalize_provider_enabled_config(cfg: Dict[str, Any]) -> Dict[str, bool]:
         if name not in result:
             result[name] = bool(enabled[name])
     return result
+
+
+def normalize_magnet_provider(value="115"):
+    """标准化磁力默认导入网盘，可为 '115', '123pan', 'ask' 等"""
+    normalized = str(value or "").strip().lower()
+    if normalized == "ask":
+        return "ask"
+    p = _get_provider_or_none(normalized)
+    if p and p.supports_offline:
+        return p.name
+    return "115"
 
 
 def normalize_subscription_provider(value: Any, fallback: str = "115") -> str:
@@ -2086,6 +2098,8 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         merged["cookie_quark"] = ""
     if "provider_enabled" not in merged:
         merged["provider_enabled"] = _build_provider_enabled_defaults()
+    if "default_magnet_provider" not in merged:
+        merged["default_magnet_provider"] = "115"
     if "sign115_enabled" not in merged:
         merged["sign115_enabled"] = False
     if "sign115_cron_time" not in merged:
@@ -2226,6 +2240,7 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     merged["webhook_secret"] = str(merged.get("webhook_secret", "")).strip()
     merged["cookie_115"] = str(merged.get("cookie_115", "")).strip()
     merged["cookie_quark"] = str(merged.get("cookie_quark", "")).strip()
+    merged["default_magnet_provider"] = normalize_magnet_provider(merged.get("default_magnet_provider", "115"))
     merged["pansou_enabled"] = normalize_bool(merged.get("pansou_enabled", False), default=False)
     merged["pansou_base_url"] = str(merged.get("pansou_base_url", "")).strip().rstrip("/")
     merged["pansou_username"] = str(merged.get("pansou_username", "") or "").strip()

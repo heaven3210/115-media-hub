@@ -1,6 +1,7 @@
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
 from ..memory import release_process_memory
+from ..providers.registry import get_or_none as get_provider_or_none
 from .monitor import queue_monitor_job
 
 
@@ -282,19 +283,28 @@ async def run_resource_job(job_id: int) -> None:
         if link_type != "magnet" and not is_share_receive_link:
             raise RuntimeError("当前仅支持 magnet 下载和已启用网盘的分享转存")
         cfg = get_config()
-        cookie_115 = str(cfg.get("cookie_115", "")).strip()
-        provider_cookie = cookie_115
+        provider_cookie = ""
         provider_label = "115"
+        mp = None  # provider instance for magnet offline tasks
         if is_share_receive_link:
             provider_label = str(getattr(share_provider, "label", "") or share_provider.name).strip()
             enabled_map = cfg.get("provider_enabled", {}) if isinstance(cfg.get("provider_enabled", {}), dict) else {}
             if not bool(enabled_map.get(share_provider.name, share_provider.name in ("115", "quark"))):
                 raise RuntimeError(f"{provider_label} 未启用")
             provider_cookie = share_provider.get_cookie(cfg)
-        if link_type == "magnet":
-            if not cookie_115:
-                raise RuntimeError("请先在参数配置中填写 115 Cookie")
-        elif not provider_cookie:
+        elif link_type == "magnet":
+            magnet_provider_name = str(
+                (job.get("extra") or {}).get("magnet_provider", "")
+                or cfg.get("default_magnet_provider", "115")
+            ).strip()
+            mp = get_provider_or_none(normalize_magnet_provider(magnet_provider_name))
+            if not mp:
+                raise RuntimeError("离线下载网盘配置无效")
+            provider_cookie = mp.get_cookie(cfg)
+            provider_label = mp.label
+            if not provider_cookie:
+                raise RuntimeError(f"请先在参数配置中填写 {provider_label} 认证信息")
+        if not provider_cookie and not is_share_receive_link:
             raise RuntimeError(f"请先在参数配置中填写 {provider_label} 认证信息")
 
         folder_id = str(job.get("folder_id", "") or "").strip()
@@ -309,8 +319,8 @@ async def run_resource_job(job_id: int) -> None:
                 if link_type == "magnet":
                     folder_id = await asyncio.wait_for(
                         asyncio.to_thread(
-                            resolve_115_folder_id_by_path,
-                            cookie_115,
+                            mp.resolve_folder_id_by_path,
+                            provider_cookie,
                             str(job.get("savepath", "") or "").strip(),
                         ),
                         timeout=min(import_timeout_seconds, 60),
@@ -349,18 +359,16 @@ async def run_resource_job(job_id: int) -> None:
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
-                        submit_115_offline_task,
-                        cookie_115,
+                        mp.submit_offline_task,
+                        provider_cookie,
                         str(job.get("link_url", "")).strip(),
                         str(job.get("folder_id", "")).strip(),
                     ),
                     timeout=import_timeout_seconds,
                 )
             except asyncio.TimeoutError as exc:
-                raise RuntimeError(f"提交到 115 超时（>{import_timeout_seconds} 秒）") from exc
-            detail = str(response.get("error_msg", "")).strip() or "115 已接收离线任务"
-            if int(response.get("errcode", 0) or 0) == 10008:
-                detail = "115 提示任务已存在，已继续走刷新流程"
+                raise RuntimeError(f"提交到 {provider_label} 超时（>{import_timeout_seconds} 秒）") from exc
+            detail = str(response.get("error_msg", "") or response.get("message", "")).strip() or f"{provider_label} 已接收离线任务"
         else:
             job_extra = safe_json_loads(job.get("extra_json"), {})
             job_selection = normalize_share_selection_meta(job_extra)

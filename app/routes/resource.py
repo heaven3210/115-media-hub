@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
 from ..memory import release_process_memory
+from ..providers.registry import get_or_none as get_provider_or_none
 from ..services.resource import cancel_resource_job, retry_resource_job, run_resource_job, trigger_resource_job_refresh
 
 router = APIRouter()
@@ -856,9 +857,16 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
         return JSONResponse(status_code=400, content={"ok": False, "msg": "提取码格式不正确，请输入 1-16 位字母或数字"})
 
     cfg = get_config()
+    magnet_provider = ""
     if link_type == "magnet":
-        if not str(cfg.get("cookie_115", "")).strip():
-            return JSONResponse(status_code=400, content={"ok": False, "msg": "请先在参数配置中填写 115 Cookie"})
+        magnet_provider = normalize_magnet_provider(data.get("magnet_provider", "") or cfg.get("default_magnet_provider", "115"))
+        if magnet_provider == "ask":
+            return JSONResponse(status_code=400, content={"ok": False, "msg": "请选择下载网盘"})
+        mp = get_provider_or_none(magnet_provider)
+        if not mp or not mp.supports_offline:
+            return JSONResponse(status_code=400, content={"ok": False, "msg": "所选网盘不支持离线下载"})
+        if not mp.get_cookie(cfg):
+            return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先在参数配置中填写 {mp.label} 认证信息"})
     elif share_provider:
         enabled_map = cfg.get("provider_enabled", {}) if isinstance(cfg.get("provider_enabled", {}), dict) else {}
         if not bool(enabled_map.get(share_provider.name, share_provider.name in ("115", "quark"))):
@@ -896,7 +904,7 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
         matched_monitor: Dict[str, Any] = {}
         monitor_task_name = ""
         if link_type == "magnet":
-            matched_monitor = match_monitor_task_for_savepath(cfg, savepath, provider="115")
+            matched_monitor = match_monitor_task_for_savepath(cfg, savepath, provider=magnet_provider)
             monitor_task_name = matched_monitor.get("task_name", "")
         elif share_provider and share_provider.supports_monitor:
             matched_monitor = match_monitor_task_for_savepath(cfg, savepath, provider=share_provider.name)
@@ -914,6 +922,8 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
             "auto_refresh": auto_refresh_requested and bool(monitor_task_name),
             "extra": {
                 "job_source": "manual_import",
+                "magnet_provider": magnet_provider,
+                "magnet_provider_label": mp.label if link_type == "magnet" and mp else "115",
             },
         }
         if is_share_receive_link:

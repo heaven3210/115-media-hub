@@ -480,7 +480,7 @@ def create_resource_job(resource: Dict[str, Any], data: Dict[str, Any]) -> int:
     provider_label = (
         str(getattr(share_provider, "label", "") or share_provider.name).strip()
         if is_share_receive_link
-        else "115"
+        else str(extra.get("magnet_provider_label", "") or "115").strip()
     )
     cursor.execute(
         """
