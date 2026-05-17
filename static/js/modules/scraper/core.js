@@ -74,35 +74,17 @@ async function showConfirm(message, options = {}) {
 }
 
 function normalizeProvider(value) {
-    const rawInput = String(value || '').trim();
-    const raw = rawInput.toLowerCase();
+    const raw = String(value || '').trim().toLowerCase();
     if (!raw) return '115';
-    const aliases = {
-        pan115: '115',
-        '115pan': '115',
-        '夸克': 'quark',
-        '夸克网盘': 'quark',
-        '天翼': 'tianyi',
-        '天翼云盘': 'tianyi',
-        '189': 'tianyi',
-        cloud189: 'tianyi',
-        '123': '123pan',
-        '123云盘': '123pan',
-        alipan: 'aliyun',
-        '阿里': 'aliyun',
-        '阿里云盘': 'aliyun',
-    };
-    const normalized = aliases[raw] || raw;
     const known = [
         ...(Array.isArray(state?.providers) ? state.providers : []),
         ...(Array.isArray(window.providerMeta) ? window.providerMeta : []),
     ];
     const matched = known.find(item => {
         const providerName = String(item?.provider || item?.name || '').trim().toLowerCase();
-        const linkType = String(item?.link_type || '').trim().toLowerCase();
-        return providerName === normalized || linkType === normalized;
+        return providerName === raw;
     });
-    return String(matched?.provider || matched?.name || normalized || '115').trim() || '115';
+    return String(matched?.provider || matched?.name || raw).trim();
 }
 
 function getProviderInfo(provider = state.provider) {
@@ -116,17 +98,7 @@ function getProviderOperations(provider = state.provider) {
     const normalized = normalizeProvider(provider);
     const info = getProviderInfo(normalized);
     if (info?.operations && typeof info.operations === 'object') return info.operations;
-    const legacyFullOps = normalized === '115' || normalized === 'quark';
-    return {
-        browse: true,
-        create_folder: true,
-        rename: legacyFullOps,
-        copy: legacyFullOps,
-        move: legacyFullOps,
-        delete: legacyFullOps,
-        scrape: legacyFullOps,
-        rollback: legacyFullOps,
-    };
+    return { browse: true, create_folder: true, rename: false, copy: false, move: false, delete: false, scrape: false, rollback: false };
 }
 
 function supportsProviderOperation(operation, provider = state.provider) {
