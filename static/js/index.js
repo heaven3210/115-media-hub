@@ -1091,13 +1091,13 @@
         }
 
         function renderCookieHealthCards() {
-            const providers = ['115', 'quark'];
-            providers.forEach((provider) => {
-                const entry = cookieHealthState?.[provider] || normalizeCookieHealthEntry({}, provider);
-                const cardEl = document.getElementById(`cookie-health-${provider}-card`);
-                const textEl = document.getElementById(`cookie-health-${provider}-text`);
+            const meta = window.providerMeta || [];
+            meta.forEach((p) => {
+                const entry = cookieHealthState?.[p.name] || normalizeCookieHealthEntry({}, p.name);
+                const cardEl = document.getElementById(`cookie-health-${p.name}-card`);
+                const textEl = document.getElementById(`cookie-health-${p.name}-text`);
                 const tone = getCookieHealthTone(entry);
-                applyCookieHealthCardTone(cardEl, tone);
+                if (cardEl) applyCookieHealthCardTone(cardEl, tone);
                 if (!textEl) return;
                 const bits = [entry.message];
                 if (entry.last_checked_at) bits.push(`上次检测 ${entry.last_checked_at}`);
