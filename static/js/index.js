@@ -1129,6 +1129,9 @@
             };
             renderCookieHealthCards();
             renderResourceCookieHint();
+            if (typeof updateCookieHealthBar === 'function') {
+                updateCookieHealthBar(cookieHealthState);
+            }
         }
 
         async function refreshCookieHealthStatus(force = false) {
