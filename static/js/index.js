@@ -249,15 +249,24 @@
         let strmCleanupRootBrowserError = '';
         let strmCleanupMainTab = 'browse';
         const DEFAULT_EXTENSIONS = "mp4,mkv,avi,mov,wmv,flv,webm,vob,mpg,mpeg,ts,m2ts,mts,rmvb,rm,asf,3gp,m4v,f4v,iso";
-        const SENSITIVE_SETTING_FIELDS = Object.freeze([
-            'password',
-            'cookie_115',
-            'cookie_quark',
-            'notify_wecom_webhook',
-            'notify_wecom_app_secret',
-            'tmdb_api_key',
-            'pansou_password',
-        ]);
+        function getSensitiveSettingFields() {
+            const fields = [
+                'password',
+                'cookie_115',
+                'cookie_quark',
+                'notify_wecom_webhook',
+                'notify_wecom_app_secret',
+                'tmdb_api_key',
+                'pansou_password',
+            ];
+            const meta = window.providerMeta || [];
+            meta.forEach(p => {
+                (p.config_keys || []).forEach(ck => {
+                    if (ck && fields.indexOf(ck) === -1) fields.push(ck);
+                });
+            });
+            return fields;
+        }
         const STATUS_FALLBACK_INTERVAL = 15000;
         const RESOURCE_SYNC_POLL_INTERVAL = 3000;
         const RESOURCE_POLL_ACTIVE_INTERVAL = 15000;
@@ -976,25 +985,27 @@
         function normalizeSensitiveConfigMeta(meta) {
             const source = meta && typeof meta === 'object' ? meta : {};
             const result = {};
-            SENSITIVE_SETTING_FIELDS.forEach((key) => {
+            getSensitiveSettingFields().forEach((key) => {
                 result[key] = !!source[key];
             });
             return result;
         }
 
         function applySensitiveConfigMeta(meta) {
+            const suffix = '（已配置，留空不覆盖）';
             sensitiveConfigMeta = normalizeSensitiveConfigMeta(meta);
-            SENSITIVE_SETTING_FIELDS.forEach((key) => {
+            getSensitiveSettingFields().forEach((key) => {
                 const el = document.getElementById(key);
                 if (!el) return;
+                let raw = String(el.getAttribute('placeholder') || '');
+                if (raw.endsWith(suffix)) raw = raw.slice(0, -suffix.length);
                 if (!Object.prototype.hasOwnProperty.call(el.dataset, 'originPlaceholder')) {
-                    el.dataset.originPlaceholder = String(el.getAttribute('placeholder') || '');
+                    el.dataset.originPlaceholder = raw;
                 }
                 const configured = !!sensitiveConfigMeta[key];
                 const originPlaceholder = String(el.dataset.originPlaceholder || '');
                 if (configured) {
-                    const suffix = '（已配置，留空不覆盖）';
-                    el.setAttribute('placeholder', originPlaceholder ? `${originPlaceholder}${suffix}` : `已配置${suffix}`);
+                    el.setAttribute('placeholder', originPlaceholder ? `${originPlaceholder}${suffix}` : suffix);
                     el.dataset.sensitiveConfigured = '1';
                 } else {
                     el.setAttribute('placeholder', originPlaceholder);
@@ -1005,7 +1016,8 @@
 
         function normalizeCookieHealthEntry(raw, provider = '115') {
             const source = raw && typeof raw === 'object' ? raw : {};
-            const providerLabel = provider === 'quark' ? 'Quark' : '115';
+            const meta = (window.providerMeta || []).find(p => p.name === provider);
+            const providerLabel = meta?.label || provider;
             const configured = !!source.configured;
             const rawState = String(source.state || (configured ? 'unknown' : 'missing')).trim().toLowerCase();
             const state = ['missing', 'unknown', 'checking', 'valid', 'invalid', 'error'].includes(rawState)
@@ -3312,7 +3324,7 @@
             const settingsModule = await loadSettingsTabModule();
             if (settingsModule?.saveSettings) {
                 await settingsModule.saveSettings({
-                    sensitiveSettingFields: SENSITIVE_SETTING_FIELDS,
+                    sensitiveSettingFields: getSensitiveSettingFields(),
                     getSensitiveConfigMeta: () => sensitiveConfigMeta,
                     applySensitiveConfigMeta,
                     applyCookieHealthState,
