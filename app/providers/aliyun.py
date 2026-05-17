@@ -361,7 +361,8 @@ class AliyunProvider(CloudProvider):
             "offset": normalized_offset,
             "next_offset": next_offset,
             "has_more": bool(next_marker),
-            "share_title": share_meta,
+            "share": share_meta,
+            "share_title": str(share_payload.get("title", "") or share_payload.get("share_name", "") or "").strip(),
             "summary": {"folder_count": folder_count, "file_count": file_count},
         }
 

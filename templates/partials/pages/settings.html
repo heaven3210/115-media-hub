@@ -286,10 +286,10 @@
                             获取方式建议：115 使用「115不大助手」；Quark 在网页版登录后用开发者工具或 Cookie-Editor 获取 `pan.quark.cn` Cookie。
                         </div>
                         <div class="text-xs text-slate-500 leading-6">
-                            安全提示：已保存的 Cookie 属于敏感信息，前端默认不回显。输入框留空并保存不会修改后端现有值；只有填写新内容并点击“保存全部配置”时，才会覆盖后端值。
+                            安全提示：已保存的 Cookie、Token、账号密码属于敏感信息，前端默认不回显。输入框留空并保存不会修改后端现有值；只有填写新内容并点击“保存全部配置”时，才会覆盖后端值。
                         </div>
                         <div class="text-xs text-slate-500 leading-6">
-                            当前支持 magnet 离线下载、115 分享链接转存与 Quark 分享转存；保存路径会自动映射到对应网盘目录。
+                            当前支持多网盘分享转存；保存路径会自动映射到对应网盘目录，只有支持离线下载的网盘会出现在 magnet 默认导入方式中。
                         </div>
 
                         <div class="rounded-2xl border border-slate-700/80 bg-slate-900/50 p-4 space-y-4">
@@ -297,7 +297,7 @@
                                 <div class="text-sm font-bold text-slate-100">保存常用目录</div>
                                 <div class="text-xs text-slate-500 leading-6 mt-1">每行一个快捷目录，格式为 `名称=网盘内路径`；也可以只写路径，系统会用最后一级目录名作为按钮名称。</div>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div id="resource-favorite-dir-settings-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="block">
                                     <span class="text-xs text-slate-500">115 常用目录</span>
                                     <textarea id="resource_favorite_dirs_115" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1 min-h-[110px]" placeholder="电影=影视/电影&#10;电视剧=影视/电视剧"></textarea>

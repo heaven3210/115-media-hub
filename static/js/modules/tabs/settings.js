@@ -64,7 +64,48 @@ function parseFavoriteDirLines(value = '') {
         .slice(0, 12);
 }
 
+function formatFavoriteDirLines(items = []) {
+    return (Array.isArray(items) ? items : [])
+        .map((item) => {
+            const path = normalizeFavoriteDirPath(item?.path || item?.savepath || '');
+            if (!path) return '';
+            const name = String(item?.name || '').trim();
+            return name ? `${name}=${path}` : path;
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
+export function renderResourceFavoriteDirSettings(favoriteDirs = {}) {
+    const grid = document.getElementById('resource-favorite-dir-settings-grid');
+    if (!grid) return;
+    const meta = (window.providerMeta || []).filter(p => p.supports_folder_browse !== false);
+    const providers = meta.length ? meta : [
+        { name: '115', label: '115' },
+        { name: 'quark', label: 'Quark' },
+    ];
+    const source = favoriteDirs && typeof favoriteDirs === 'object' ? favoriteDirs : {};
+    grid.innerHTML = providers.map((p) => {
+        const providerName = String(p.name || '').trim();
+        const providerLabel = String(p.label || providerName).trim();
+        const textareaId = `resource_favorite_dirs_${providerName.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+        return `
+            <label class="block">
+                <span class="text-xs text-slate-500">${escapeHtml(providerLabel)} 常用目录</span>
+                <textarea id="${escapeHtml(textareaId)}" data-resource-favorite-provider="${escapeHtml(providerName)}" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1 min-h-[110px]" placeholder="电影=影视/电影&#10;电视剧=影视/电视剧">${escapeHtml(formatFavoriteDirLines(source[providerName] || []))}</textarea>
+            </label>
+        `;
+    }).join('');
+}
+
 function collectResourceFavoriteDirs() {
+    const result = {};
+    document.querySelectorAll('[data-resource-favorite-provider]').forEach((el) => {
+        const provider = String(el.getAttribute('data-resource-favorite-provider') || '').trim();
+        if (!provider) return;
+        result[provider] = parseFavoriteDirLines(el.value || '');
+    });
+    if (Object.keys(result).length) return result;
     return {
         '115': parseFavoriteDirLines(document.getElementById('resource_favorite_dirs_115')?.value || ''),
         quark: parseFavoriteDirLines(document.getElementById('resource_favorite_dirs_quark')?.value || ''),
@@ -642,11 +683,17 @@ async function testProviderCookie(name) {
     const p = meta.find(m => m.name === name);
     if (!p) return;
     const cookieKey = p.config_keys[0] || 'cookie_' + name;
-    const el = document.getElementById(cookieKey);
-    const cookie = el ? el.value.trim() : '';
+    const credentials = {};
+    (Array.isArray(p.config_keys) ? p.config_keys : [cookieKey]).forEach((key) => {
+        credentials[key] = String(document.getElementById(key)?.value || '').trim();
+    });
+    const cookie = String(credentials[cookieKey] || '').trim();
+    const hasCurrentInput = p.auth_type === 'password'
+        ? (Array.isArray(p.config_keys) ? p.config_keys : [cookieKey]).every(key => String(credentials[key] || '').trim())
+        : !!cookie;
     const statusEl = document.getElementById('provider-health-' + name);
     if (statusEl) { statusEl.textContent = '检测中...'; statusEl.className = 'text-xs text-slate-500'; }
-    if (!cookie) {
+    if (!hasCurrentInput) {
         let checked = false;
         if (typeof window.checkCookieHealthProvider === 'function') {
             checked = !!(await window.checkCookieHealthProvider(name));
@@ -658,7 +705,7 @@ async function testProviderCookie(name) {
         return;
     }
     try {
-        const resp = await window.MediaHubApi.postJson('/test_provider_cookie', { provider: name, cookie: cookie });
+        const resp = await window.MediaHubApi.postJson('/test_provider_cookie', { provider: name, cookie: cookie, credentials });
         if (statusEl) {
             statusEl.textContent = resp && resp.ok ? '✓ 当前输入可用，保存后生效' : '✗ ' + ((resp && resp.error) || '连接失败');
             statusEl.className = 'text-xs ' + (resp && resp.ok ? 'text-emerald-400' : 'text-red-400');
@@ -793,7 +840,7 @@ function buildCookieHealthCheckingState(sourceState, providers) {
         nextState[name] = {
             configured: !!entry.configured,
             state: 'checking',
-            message: `正在检测 ${label} Cookie...`,
+            message: `正在检测 ${label} 认证信息...`,
             last_checked_at: String(entry.last_checked_at || ''),
             last_success_at: String(entry.last_success_at || ''),
             trigger: 'manual_check',
@@ -933,6 +980,7 @@ export function updateCookieHealthBar(cookieHealthState) {
 if (typeof window !== 'undefined') {
     window.renderProviderAuthBlocks = renderProviderAuthBlocks;
     window.renderMagnetProviderSetting = renderMagnetProviderSetting;
+    window.renderResourceFavoriteDirSettings = renderResourceFavoriteDirSettings;
     window.toggleProviderBlock = toggleProviderBlock;
     window.toggleProviderEnabled = toggleProviderEnabled;
     window.testProviderCookie = testProviderCookie;

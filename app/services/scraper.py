@@ -173,12 +173,11 @@ def build_scraper_providers_payload(cfg: Optional[Dict[str, Any]] = None) -> Dic
         provider = normalize_scraper_provider(p.name)
         if not provider:
             continue
-        cookie = p.get_cookie(active_cfg)
         providers.append(
             {
                 "provider": provider,
                 "label": p.label,
-                "configured": bool(cookie),
+                "configured": bool(p.is_configured(active_cfg)),
                 "operations": _build_scraper_operations(provider),
             }
         )

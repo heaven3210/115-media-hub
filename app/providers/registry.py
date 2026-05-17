@@ -80,5 +80,9 @@ def get_all_capabilities(cfg: Optional[Dict[str, Any]] = None) -> List[Dict[str,
                 "supports_fixed_share_link": p.supports_fixed_share_link,
                 "supports_strm": p.supports_strm,
                 "supports_monitor": p.supports_monitor,
+                "supports_rename": p.supports_rename,
+                "supports_move": p.supports_move,
+                "supports_copy": p.supports_copy,
+                "supports_delete": p.supports_delete,
             })
         return result

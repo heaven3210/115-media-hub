@@ -4,16 +4,24 @@ function getScraperProviderOptions() {
     const meta = window.providerMeta || [];
     return meta
         .filter(p => p.enabled && p.supports_folder_browse !== false)
-        .map(p => ({ provider: p.name, label: p.label }));
+        .map(p => ({
+            provider: p.name,
+            label: p.label,
+            configured: true,
+            configuredKnown: false,
+            operations: buildProviderOperationsFromMeta(p),
+        }));
 }
 
 const state = {
     initialized: false,
     provider: '115',
     providers: [],
+    providersLoaded: false,
     cid: '0',
     trail: [{ id: '0', name: '根目录' }],
     entries: [],
+    entryError: '',
     summary: { folder_count: 0, file_count: 0 },
     selected: new Map(),
     entrySort: { key: 'name', direction: 'asc' },
@@ -87,6 +95,24 @@ function normalizeProvider(value) {
     return String(matched?.provider || matched?.name || raw).trim();
 }
 
+function buildProviderOperationsFromMeta(item = {}) {
+    const browseSupported = item?.supports_folder_browse !== false;
+    const fileOpsSupported = item?.supports_rename === true
+        && item?.supports_move === true
+        && item?.supports_copy === true
+        && item?.supports_delete === true;
+    return {
+        browse: browseSupported,
+        create_folder: browseSupported,
+        rename: fileOpsSupported,
+        copy: fileOpsSupported,
+        move: fileOpsSupported,
+        delete: fileOpsSupported,
+        scrape: fileOpsSupported,
+        rollback: fileOpsSupported,
+    };
+}
+
 function getProviderInfo(provider = state.provider) {
     const normalized = normalizeProvider(provider);
     return state.providers.find(item => normalizeProvider(item.provider) === normalized)
@@ -98,6 +124,7 @@ function getProviderOperations(provider = state.provider) {
     const normalized = normalizeProvider(provider);
     const info = getProviderInfo(normalized);
     if (info?.operations && typeof info.operations === 'object') return info.operations;
+    if (info) return buildProviderOperationsFromMeta(info);
     return { browse: true, create_folder: true, rename: false, copy: false, move: false, delete: false, scrape: false, rollback: false };
 }
 
@@ -114,7 +141,8 @@ function getProviderLabel(provider = state.provider) {
 function isProviderConfigured(provider = state.provider) {
     const normalized = normalizeProvider(provider);
     const item = getProviderInfo(normalized);
-    return !!item?.configured;
+    if (item && typeof item.configured === 'boolean') return item.configured;
+    return true;
 }
 
 function normalizeCid(value) {
@@ -448,11 +476,17 @@ function renderProviderTabs() {
     if (!container) return;
     const providers = state.providers.length
         ? state.providers
-        : getScraperProviderOptions().map(p => ({ provider: p.provider, label: p.label, configured: false }));
+        : getScraperProviderOptions();
+    if (!providers.length) {
+        container.innerHTML = '';
+        return;
+    }
     container.innerHTML = providers.map((item) => {
         const provider = normalizeProvider(item.provider);
         const active = provider === state.provider;
-        const configured = !!item.configured;
+        const configuredKnown = item.configuredKnown !== false && typeof item.configured === 'boolean';
+        const configured = configuredKnown ? !!item.configured : true;
+        const statusText = configuredKnown ? (configured ? '已配置' : '未配置') : '已启用';
         return `
             <button
                 type="button"
@@ -461,7 +495,7 @@ function renderProviderTabs() {
                 aria-pressed="${active ? 'true' : 'false'}"
             >
                 <span>${escapeHtml(item.label || getProviderLabel(provider))}</span>
-                <small>${configured ? '已配置' : '未配置'}</small>
+                <small>${statusText}</small>
             </button>
         `;
     }).join('');
@@ -470,6 +504,11 @@ function renderProviderTabs() {
 function renderProviderStatus() {
     const el = $('scraper-provider-status');
     if (!el) return;
+    const availableProviders = state.providers.length ? state.providers : getScraperProviderOptions();
+    if (!availableProviders.length) {
+        el.textContent = '未启用可浏览网盘。';
+        return;
+    }
     const providerLabel = getProviderLabel();
     if (!isProviderConfigured()) {
         el.textContent = `${providerLabel} 认证信息未配置，文件管理和刮削执行暂不可用。`;
@@ -477,7 +516,7 @@ function renderProviderStatus() {
     }
     const folderCount = Number(state.summary.folder_count || 0);
     const fileCount = Number(state.summary.file_count || 0);
-    const scrapeNote = supportsProviderOperation('scrape') ? '' : ' / 暂不支持刮削执行';
+    const scrapeNote = state.providersLoaded && !supportsProviderOperation('scrape') ? ' / 暂不支持刮削执行' : '';
     el.textContent = `${providerLabel} / 当前目录 ${folderCount} 个文件夹、${fileCount} 个文件${scrapeNote}`;
 }
 
@@ -734,7 +773,11 @@ function renderEntries() {
         return;
     }
     if (!isProviderConfigured()) {
-        list.innerHTML = `<div class="scraper-empty-row">请先到参数配置填写 ${escapeHtml(getProviderLabel())} Cookie。</div>`;
+        list.innerHTML = `<div class="scraper-empty-row">请先到参数配置填写 ${escapeHtml(getProviderLabel())} 认证信息。</div>`;
+        return;
+    }
+    if (state.entryError) {
+        list.innerHTML = `<div class="scraper-empty-row">读取${escapeHtml(getProviderLabel())}目录失败：${escapeHtml(state.entryError)}</div>`;
         return;
     }
     if (!state.entries.length) {
@@ -1209,13 +1252,34 @@ function renderJobs() {
     }).join('');
 }
 
+function applyProvidersFromMeta() {
+    const providers = getScraperProviderOptions();
+    if (!providers.length) return false;
+    state.providers = providers;
+    const current = providers.find(item => normalizeProvider(item.provider) === state.provider);
+    if (!current) state.provider = normalizeProvider(providers[0].provider);
+    renderProviderTabs();
+    renderProviderStatus();
+    return true;
+}
+
 async function loadProviders() {
-    const data = await window.MediaHubApi.getJson('/scraper/providers');
-    state.providers = Array.isArray(data.providers) ? data.providers : [];
-    const current = state.providers.find(item => normalizeProvider(item.provider) === state.provider);
-    if (!current || !current.configured) {
-        const firstConfigured = state.providers.find(item => item.configured);
-        if (firstConfigured) state.provider = normalizeProvider(firstConfigured.provider);
+    applyProvidersFromMeta();
+    try {
+        const data = await window.MediaHubApi.getJson('/scraper/providers');
+        state.providersLoaded = true;
+        state.providers = (Array.isArray(data.providers) ? data.providers : []).map(item => ({
+            ...item,
+            configuredKnown: true,
+        }));
+        const current = state.providers.find(item => normalizeProvider(item.provider) === state.provider);
+        if (!current && state.providers.length) {
+            state.provider = normalizeProvider(state.providers[0].provider);
+        }
+    } catch (error) {
+        state.providersLoaded = false;
+        if (!state.providers.length) applyProvidersFromMeta();
+        showToast(`读取网盘列表失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3200, placement: 'top-center' });
     }
     renderProviderTabs();
     renderProviderStatus();
@@ -1223,6 +1287,7 @@ async function loadProviders() {
 
 async function loadEntries({ force = false, keepSearch = true } = {}) {
     state.loading = true;
+    state.entryError = '';
     renderEntries();
     try {
         const params = new URLSearchParams({ cid: state.cid });
@@ -1231,12 +1296,14 @@ async function loadEntries({ force = false, keepSearch = true } = {}) {
         const data = await window.MediaHubApi.getJson(`/scraper/${encodeURIComponent(state.provider)}/entries?${params.toString()}`);
         state.entries = (Array.isArray(data.entries) ? data.entries : []).map(enrichEntry);
         state.summary = data.summary || { folder_count: 0, file_count: 0 };
+        state.entryError = '';
         clearSelection();
         resetIdentifyContext({ resetInputs: true });
     } catch (error) {
         state.entries = [];
         state.summary = { folder_count: 0, file_count: 0 };
-        showToast(`读取目录失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3200, placement: 'top-center' });
+        state.entryError = error.message || '未知错误';
+        showToast(`读取目录失败：${state.entryError}`, { tone: 'error', duration: 3200, placement: 'top-center' });
     } finally {
         state.loading = false;
         renderEntries();

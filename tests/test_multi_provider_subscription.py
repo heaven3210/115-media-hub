@@ -1,11 +1,16 @@
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from app.core import (
+    build_cookie_health_payload,
     normalize_subscription_task,
     validate_subscription_runtime_config,
 )
-from app.providers.registry import get_all_capabilities
+from app.providers.registry import get_all_capabilities, get_or_none
+from app.providers.quark import list_quark_share_entries_fast
+from app.routes import resource as resource_routes
 from app.routes.resource import _compact_resource_browser_entries
+from app.services.scraper import build_scraper_providers_payload
 from app.services.subscription import _filter_subscription_supported_items
 
 
@@ -59,13 +64,15 @@ class MultiProviderSubscriptionTest(unittest.TestCase):
         )
         enabled_cfg = {
             "provider_enabled": {"123pan": True},
-            "cookie_123pan": "cookie-value",
+            "123pan_username": "demo",
+            "123pan_password": "secret",
         }
         self.assertIsNone(validate_subscription_runtime_config(enabled_cfg, task))
 
         disabled_cfg = {
             "provider_enabled": {"123pan": False},
-            "cookie_123pan": "cookie-value",
+            "123pan_username": "demo",
+            "123pan_password": "secret",
         }
         self.assertIn("未启用", validate_subscription_runtime_config(disabled_cfg, task))
 
@@ -101,6 +108,58 @@ class MultiProviderSubscriptionTest(unittest.TestCase):
 
         self.assertEqual(entries[0]["fid"], "file-1")
         self.assertEqual(entries[0]["parent_id"], "folder-1")
+
+    def test_password_provider_configuration_does_not_fall_back_to_115_cookie(self):
+        provider = get_or_none("123pan")
+
+        self.assertIsNotNone(provider)
+        self.assertFalse(provider.is_configured({"123pan_username": "demo"}))
+        self.assertTrue(provider.is_configured({"123pan_username": "demo", "123pan_password": "secret"}))
+
+        payload = build_cookie_health_payload({"cookie_115": "valid-looking-cookie"})
+        self.assertFalse(payload["123pan"]["configured"])
+        self.assertEqual(payload["123pan"]["state"], "missing")
+
+    def test_scraper_provider_payload_does_not_login_password_provider(self):
+        provider = get_or_none("123pan")
+
+        self.assertIsNotNone(provider)
+        cfg = {
+            "provider_enabled": {"115": False, "quark": False, "123pan": True},
+            "123pan_username": "demo",
+            "123pan_password": "secret",
+        }
+        with patch.object(provider, "get_cookie", side_effect=AssertionError("should not login")):
+            payload = build_scraper_providers_payload(cfg)
+
+        self.assertTrue(payload["ok"])
+        providers = {item["provider"]: item for item in payload["providers"]}
+        self.assertTrue(providers["123pan"]["configured"])
+
+
+class ResourceProviderLoadingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_generic_quark_share_route_uses_fast_share_reader_when_paged(self):
+        provider = get_or_none("quark")
+        mocked_runner = AsyncMock(return_value={"entries": [], "summary": {}, "elapsed_ms": 1})
+
+        with patch.object(resource_routes, "run_resource_browse_io", mocked_runner):
+            await resource_routes._list_resource_share_entries_with_provider(
+                provider,
+                "cookie=value",
+                "https://pan.quark.cn/s/abcdef",
+                "",
+                "",
+                "0",
+                0,
+                50,
+                paged=True,
+                folders_only=False,
+            )
+
+        args, kwargs = mocked_runner.call_args
+        self.assertIs(args[0], list_quark_share_entries_fast)
+        self.assertIs(kwargs["executor"], resource_routes.resource_quark_share_executor)
+        self.assertTrue(kwargs["include_diagnostics"])
 
 
 if __name__ == "__main__":

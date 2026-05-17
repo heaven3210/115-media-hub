@@ -224,7 +224,8 @@ def _build_resource_share_entries_response(
     diagnostics: Dict[str, Any] = {}
     if isinstance(result, dict):
         timings = result.get("timings", []) if isinstance(result.get("timings"), list) else []
-        if timings or result.get("elapsed_ms") is not None:
+        transport_timings = result.get("transport_timings")
+        if timings or result.get("elapsed_ms") is not None or isinstance(transport_timings, dict):
             diagnostics = {
                 "elapsed_ms": parse_int(result.get("elapsed_ms"), default=0),
                 "timings": [
@@ -242,7 +243,6 @@ def _build_resource_share_entries_response(
                 "cache_stale": bool(result.get("cache_stale", False)),
                 "cache_error": str(result.get("cache_error", "") or "").strip(),
             }
-            transport_timings = result.get("transport_timings", {})
             if isinstance(transport_timings, dict):
                 diagnostics.update(
                     {
@@ -323,6 +323,26 @@ def _build_resource_folder_response(
     }
 
 
+async def _list_resource_folder_entries_with_provider(
+    provider: Any,
+    cookie: str,
+    cid: str,
+    *,
+    folders_only: bool = False,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    provider_name = str(getattr(provider, "name", "") or "").strip()
+    if provider_name == "115":
+        return await run_resource_browse_io(
+            list_115_entries_payload,
+            cookie,
+            cid,
+            force_refresh,
+            folders_only,
+        )
+    return await run_resource_browse_io(provider.list_entries_payload, cookie, cid, folders_only)
+
+
 def _normalize_provider_share_entries_result(
     provider: Any,
     share_payload: Dict[str, Any],
@@ -367,6 +387,86 @@ def _normalize_provider_share_entries_result(
         "next_offset": next_offset,
         "has_more": bool(payload.get("has_more", False)) or (total > next_offset),
     }
+
+
+async def _list_resource_share_entries_with_provider(
+    provider: Any,
+    cookie: str,
+    link_url: str,
+    raw_text: str,
+    receive_code: str,
+    cid: str,
+    offset: int,
+    limit: int,
+    *,
+    paged: bool,
+    folders_only: bool,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    provider_name = str(getattr(provider, "name", "") or "").strip()
+    if provider_name == "115":
+        return await run_resource_browse_io(
+            list_115_share_entries,
+            cookie,
+            link_url,
+            raw_text,
+            cid,
+            receive_code,
+            force_refresh,
+            RESOURCE_SHARE_BROWSE_TIMEOUT_SECONDS,
+            RESOURCE_SHARE_BROWSE_RATE_LIMIT_SECONDS,
+            RESOURCE_SHARE_BROWSE_MAX_RETRIES,
+            offset,
+            limit,
+            1 if paged else 0,
+            folders_only,
+            executor=resource_115_share_executor,
+            include_diagnostics=True,
+        )
+    if provider_name == "quark":
+        share_reader = list_quark_share_entries_fast if paged else list_quark_share_entries
+        request_timeout = RESOURCE_QUARK_SHARE_FAST_DEADLINE_SECONDS if paged else RESOURCE_SHARE_BROWSE_TIMEOUT_SECONDS
+        return await run_resource_browse_io(
+            share_reader,
+            cookie,
+            link_url,
+            raw_text,
+            cid,
+            receive_code,
+            force_refresh,
+            request_timeout,
+            offset,
+            limit,
+            1 if paged else 0,
+            folders_only,
+            executor=resource_quark_share_executor,
+            include_diagnostics=True,
+        )
+
+    share_payload = await run_resource_browse_io(
+        provider.resolve_share_payload,
+        cookie,
+        link_url,
+        raw_text,
+        receive_code,
+    )
+    result = await run_resource_browse_io(
+        provider.list_share_entries,
+        cookie,
+        share_payload,
+        cid,
+        offset,
+        limit,
+        include_diagnostics=True,
+    )
+    return _normalize_provider_share_entries_result(
+        provider,
+        share_payload,
+        result,
+        cid=cid,
+        offset=offset,
+        limit=limit,
+    )
 
 
 def _run_resource_browse_io_timed(func, submitted_mono: float, args: tuple, kwargs: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
@@ -969,7 +1069,8 @@ async def unified_browse(request: Request):
     cookie = p.get_cookie(cfg)
     if not cookie:
         raise HTTPException(status_code=400, detail=f"{p.label} 未配置认证信息")
-    payload = await run_resource_browse_io(p.list_entries_payload, cookie, cid)
+    force_refresh = request.query_params.get("force_refresh") == "1"
+    payload = await _list_resource_folder_entries_with_provider(p, cookie, cid, force_refresh=force_refresh)
     return JSONResponse(payload)
 
 
@@ -1006,8 +1107,15 @@ async def get_provider_folders_endpoint(provider_name: str, request: Request) ->
     cid = str(request.query_params.get("cid", "0") or "0").strip() or "0"
     folders_only = request.query_params.get("folders_only") == "1"
     compact = request.query_params.get("compact") == "1"
+    force_refresh = request.query_params.get("force_refresh") == "1"
     try:
-        payload = await run_resource_browse_io(p.list_entries_payload, cookie, cid, folders_only)
+        payload = await _list_resource_folder_entries_with_provider(
+            p,
+            cookie,
+            cid,
+            folders_only=folders_only,
+            force_refresh=force_refresh,
+        )
         entries_all = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
         summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
         if not summary:
@@ -1079,31 +1187,22 @@ async def get_provider_share_entries_endpoint(provider_name: str, request: Reque
         return JSONResponse(status_code=400, content={"ok": False, "msg": "提取码格式不正确，请输入 1-16 位字母或数字"})
     paged = request.query_params.get("paged") == "1"
     folders_only = request.query_params.get("folders_only") == "1"
+    force_refresh = request.query_params.get("force_refresh") == "1"
     offset = max(0, parse_int(request.query_params.get("offset", 0), default=0))
     limit = max(20, min(parse_int(request.query_params.get("limit", 200), default=200), 400))
     try:
-        share_payload = await run_resource_browse_io(
-            p.resolve_share_payload,
+        normalized_result = await _list_resource_share_entries_with_provider(
+            p,
             cookie,
             str(resource.get("link_url", "")).strip(),
             str(resource.get("raw_text", "") or ""),
             receive_code,
-        )
-        result = await run_resource_browse_io(
-            p.list_share_entries,
-            cookie,
-            share_payload,
             cid,
             offset,
             limit,
-        )
-        normalized_result = _normalize_provider_share_entries_result(
-            p,
-            share_payload,
-            result,
-            cid=cid,
-            offset=offset,
-            limit=limit,
+            paged=paged,
+            folders_only=folders_only,
+            force_refresh=force_refresh,
         )
         return _build_resource_share_entries_response(
             cid,
@@ -1141,18 +1240,22 @@ async def preview_provider_share_entries_endpoint(provider_name: str, request: R
     cid = str(data.get("cid", "0") or "0").strip() or "0"
     paged = bool(data.get("paged", False))
     folders_only = bool(data.get("folders_only", False))
+    force_refresh = bool(data.get("force_refresh", False))
     offset = max(0, parse_int(data.get("offset", 0), default=0))
     limit = max(20, min(parse_int(data.get("limit", 200), default=200), 400))
     try:
-        share_payload = await run_resource_browse_io(p.resolve_share_payload, cookie, link_url, raw_text, receive_code)
-        result = await run_resource_browse_io(p.list_share_entries, cookie, share_payload, cid, offset, limit)
-        normalized_result = _normalize_provider_share_entries_result(
+        normalized_result = await _list_resource_share_entries_with_provider(
             p,
-            share_payload,
-            result,
-            cid=cid,
-            offset=offset,
-            limit=limit,
+            cookie,
+            link_url,
+            raw_text,
+            receive_code,
+            cid,
+            offset,
+            limit,
+            paged=paged,
+            folders_only=folders_only,
+            force_refresh=force_refresh,
         )
         return _build_resource_share_entries_response(
             cid,

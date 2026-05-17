@@ -112,3 +112,22 @@ class CloudProvider(ABC):
             if value:
                 return value
         return ""
+
+    def is_configured(self, cfg: Dict[str, Any]) -> bool:
+        """判断认证配置是否填写完整，不触发远端登录或 token 刷新。"""
+        if not self.name:
+            return False
+        source = cfg if isinstance(cfg, dict) else {}
+        candidates = self.config_keys if self.config_keys else [f"cookie_{self.name}"]
+        if not candidates:
+            return False
+        if self.auth_type == "password":
+            return all(str(source.get(key, "") or "").strip() for key in candidates)
+        return any(str(source.get(key, "") or "").strip() for key in candidates)
+
+    def auth_label(self) -> str:
+        if self.auth_type == "cookie":
+            return "Cookie"
+        if self.auth_type == "refresh_token":
+            return "refresh_token"
+        return "认证信息"

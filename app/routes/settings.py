@@ -64,7 +64,7 @@ async def save_settings_endpoint(request: Request) -> Dict[str, Any]:
     saved_cfg = get_config()
     for provider_name in get_cookie_health_providers():
         p = _get_provider_or_none(provider_name)
-        if p and p.get_cookie(saved_cfg):
+        if p and p.is_configured(saved_cfg):
             mark_cookie_health_checking(provider_name, trigger="settings_save")
     cookie_health = build_cookie_health_payload(saved_cfg)
     schedule_ui_state_push(0)
@@ -189,16 +189,31 @@ async def test_provider_cookie(request: Request) -> JSONResponse:
         data = await request.json()
         provider_name = str(data.get("provider", "")).strip()
         cookie = str(data.get("cookie", "")).strip()
+        credentials = data.get("credentials", {})
+        credentials_payload = credentials if isinstance(credentials, dict) else {}
 
-        if not provider_name or not cookie:
-            return JSONResponse(content={"ok": False, "error": "缺少provider或cookie"})
+        if not provider_name:
+            return JSONResponse(content={"ok": False, "error": "缺少provider"})
 
         provider = _get_provider_or_none(provider_name)
         if not provider:
             return JSONResponse(content={"ok": False, "error": f"未知的网盘: {provider_name}"})
 
         try:
-            ok = await asyncio.to_thread(provider.probe_connectivity, cookie)
+            credential_value = cookie
+            if credentials_payload:
+                probe_cfg = {
+                    key: str(credentials_payload.get(key, "") or "").strip()
+                    for key in getattr(provider, "config_keys", [])
+                }
+                if not provider.is_configured(probe_cfg):
+                    return JSONResponse(content={"ok": False, "error": f"缺少 {provider.label} 认证信息"})
+                credential_value = await asyncio.to_thread(provider.get_cookie, probe_cfg)
+
+            if not credential_value:
+                return JSONResponse(content={"ok": False, "error": f"缺少 {provider.label} 认证信息"})
+
+            ok = await asyncio.to_thread(provider.probe_connectivity, credential_value)
             if ok:
                 return JSONResponse(content={"ok": True})
             else:

@@ -214,6 +214,7 @@ class TianyiProvider(CloudProvider):
         return {
             "entries": entries,
             "total": data.get("data", {}).get("total", len(entries)),
+            "share": dict(share_payload),
             "share_title": str(data.get("data", {}).get("shareName", "") or "").strip(),
             "summary": {
                 "folder_count": folder_count,

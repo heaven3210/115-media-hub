@@ -204,7 +204,8 @@ class Pan123Provider(CloudProvider):
                 "folder_count": folder_count,
                 "file_count": file_count,
             },
-            "share_title": share_payload,
+            "share": dict(share_payload),
+            "share_title": str(share_payload.get("title", "") or share_payload.get("share_name", "") or "").strip(),
         }
 
     def prepare_share_receive(self, cookie, share_payload, cid="0"):

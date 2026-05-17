@@ -127,6 +127,9 @@
                 if (typeof renderMagnetProviderSetting === 'function') {
                     renderMagnetProviderSetting(cfg);
                 }
+                if (typeof renderResourceFavoriteDirSettings === 'function') {
+                    renderResourceFavoriteDirSettings(cfg.resource_favorite_dirs || {});
+                }
                 if (typeof renderCookieHealthBar === 'function') {
                     renderCookieHealthBar(cfg.cookie_health || {});
                 }

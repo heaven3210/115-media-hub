@@ -3473,7 +3473,7 @@ def validate_subscription_runtime_config(cfg: Dict[str, Any], task: Dict[str, An
         return f"{p.label} 未启用，请先在参数配置中启用该网盘"
     if not bool(getattr(p, "supports_subscription", False)):
         return f"{p.label} 暂不支持订阅"
-    if not p.get_cookie(cfg):
+    if not p.is_configured(cfg):
         return f"请先在参数配置中填写 {p.label} 认证信息"
     if not str(task.get("name", "")).strip():
         return "任务名未填写"
@@ -3811,28 +3811,57 @@ def _cookie_health_provider_label(provider: str) -> str:
     return "Quark" if provider_key == "quark" else ("115" if provider_key == "115" else provider_key)
 
 
+def _cookie_health_auth_label(provider: str) -> str:
+    provider_key = normalize_cookie_health_provider(provider)
+    try:
+        p = _get_provider_or_none(provider_key)
+        if p and hasattr(p, "auth_label"):
+            return str(p.auth_label() or "认证信息")
+    except Exception:
+        pass
+    return "Cookie"
+
+
+def _cookie_health_is_configured(cfg: Dict[str, Any], provider: str) -> bool:
+    provider_key = normalize_cookie_health_provider(provider)
+    try:
+        p = _get_provider_or_none(provider_key)
+        if p and hasattr(p, "is_configured"):
+            return bool(p.is_configured(cfg or {}))
+    except Exception:
+        return False
+    if provider_key == "quark":
+        return bool(str((cfg or {}).get("cookie_quark", "") or "").strip())
+    if provider_key == "115":
+        return bool(str((cfg or {}).get("cookie_115", "") or "").strip())
+    return False
+
+
 def _cookie_health_cookie_value(cfg: Dict[str, Any], provider: str) -> str:
     provider_key = normalize_cookie_health_provider(provider)
     try:
         p = _get_provider_or_none(provider_key)
-        if p:
+        if p and _cookie_health_is_configured(cfg, provider_key):
             return p.get_cookie(cfg or {})
     except Exception:
-        pass
-    key = "cookie_quark" if provider_key == "quark" else "cookie_115"
-    return str((cfg or {}).get(key, "") or "").strip()
+        raise
+    if provider_key == "quark":
+        return str((cfg or {}).get("cookie_quark", "") or "").strip()
+    if provider_key == "115":
+        return str((cfg or {}).get("cookie_115", "") or "").strip()
+    return ""
 
 
 def _cookie_health_missing_message(provider: str) -> str:
-    return f"未配置 {_cookie_health_provider_label(provider)} Cookie"
+    return f"未配置 {_cookie_health_provider_label(provider)} {_cookie_health_auth_label(provider)}"
 
 
 def _cookie_health_unknown_message(provider: str) -> str:
-    return f"已配置 {_cookie_health_provider_label(provider)} Cookie，等待检测"
+    return f"已配置 {_cookie_health_provider_label(provider)} {_cookie_health_auth_label(provider)}，等待检测"
 
 
 def _cookie_health_valid_message(provider: str) -> str:
-    return f"{_cookie_health_provider_label(provider)} Cookie 可用"
+    return f"{_cookie_health_provider_label(provider)} {_cookie_health_auth_label(provider)} 可用"
 
 
 def _ensure_cookie_health_entry_locked(provider: str) -> Dict[str, Any]:
@@ -3898,7 +3927,7 @@ def sync_cookie_health_configured(cfg: Optional[Dict[str, Any]] = None, trigger:
             entry = _ensure_cookie_health_entry_locked(provider)
             if not entry:
                 continue
-            configured = bool(_cookie_health_cookie_value(active_cfg, provider))
+            configured = _cookie_health_is_configured(active_cfg, provider)
             if not configured:
                 changed = _set_cookie_health_entry_locked(
                     provider,
@@ -3933,7 +3962,7 @@ def mark_cookie_health_checking(provider: str, trigger: str = "manual_check") ->
     if is_cookie_health_share_trigger(trigger):
         return
     cfg = get_config()
-    configured = bool(_cookie_health_cookie_value(cfg, provider_key))
+    configured = _cookie_health_is_configured(cfg, provider_key)
     changed = False
     with cookie_health_lock:
         _ensure_cookie_health_entry_locked(provider_key)
@@ -3970,7 +3999,7 @@ def mark_cookie_health_success(
     if is_cookie_health_share_trigger(trigger):
         return
     cfg = get_config()
-    configured = bool(_cookie_health_cookie_value(cfg, provider_key))
+    configured = _cookie_health_is_configured(cfg, provider_key)
     now_ts = time.time()
     now_iso = now_text()
     changed = False
@@ -4027,7 +4056,7 @@ def mark_cookie_health_failure(
     if is_cookie_health_share_trigger(trigger):
         return
     cfg = get_config()
-    configured = bool(_cookie_health_cookie_value(cfg, provider_key))
+    configured = _cookie_health_is_configured(cfg, provider_key)
     now_ts = time.time()
     now_iso = now_text()
     changed = False
@@ -4214,8 +4243,7 @@ async def refresh_cookie_health_status(
     now_ts = time.time()
 
     for provider in provider_list:
-        cookie_value = _cookie_health_cookie_value(cfg, provider)
-        if not cookie_value:
+        if not _cookie_health_is_configured(cfg, provider):
             mark_cookie_health_failure(provider, _cookie_health_missing_message(provider), trigger=trigger, force=True)
             continue
 
@@ -4227,6 +4255,9 @@ async def refresh_cookie_health_status(
 
         mark_cookie_health_checking(provider, trigger=trigger)
         try:
+            cookie_value = _cookie_health_cookie_value(cfg, provider)
+            if not cookie_value:
+                raise RuntimeError(_cookie_health_missing_message(provider))
             p = _get_provider_or_none(provider)
             if p:
                 ok = await asyncio.to_thread(p.probe_connectivity, cookie_value)
@@ -5408,7 +5439,7 @@ def _build_resource_state_payload_snapshot(
     provider_auth_configured: Dict[str, bool] = {}
     try:
         for p in list_all():
-            provider_auth_configured[p.name] = bool(p.get_cookie(cfg))
+            provider_auth_configured[p.name] = bool(p.is_configured(cfg))
     except Exception:
         provider_auth_configured = {
             "115": bool(str(cfg.get("cookie_115", "")).strip()),

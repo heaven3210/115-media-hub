@@ -8,6 +8,8 @@ from app.providers.aliyun import ALIYUN_API_BASE, AliyunProvider
 class DummyResponse:
     def __init__(self, payload):
         self.payload = payload
+        self.status_code = 200
+        self.text = "{}"
 
     def raise_for_status(self):
         return None

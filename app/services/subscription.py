@@ -538,7 +538,7 @@ def _scan_subscription_task_episode_view_payload(task_name: str) -> Dict[str, An
 
     cookie = p.get_cookie(cfg)
     if not cookie:
-        raise RuntimeError(f"请先在参数配置页填写 {p.label} Cookie")
+        raise RuntimeError(f"请先在参数配置页填写 {p.label} 认证信息")
     folder_id = p.ensure_folder_id_by_path(cookie, scan_savepath)
     scan_result = _scan_provider_existing_tv_episodes(p, cookie, folder_id, task)
 
