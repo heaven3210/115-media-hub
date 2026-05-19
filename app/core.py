@@ -266,6 +266,15 @@ def _resolve_session_secret() -> str:
         return secrets.token_hex(32)
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "1" if default else "0") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
+def _split_env_list(value: str) -> List[str]:
+    return [item.strip() for item in re.split(r"[\s,]+", value or "") if item.strip()]
+
+
 app = FastAPI()
 app.add_middleware(
     SessionMiddleware,
@@ -304,15 +313,6 @@ app.add_middleware(
     GZipMiddleware,
     minimum_size=1024,
 )
-
-
-def _split_env_list(value: str) -> List[str]:
-    return [item.strip() for item in re.split(r"[\s,]+", value or "") if item.strip()]
-
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = str(os.environ.get(name, "1" if default else "0") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on", "enable", "enabled"}
 
 
 cors_allow_origins = _split_env_list(os.environ.get("CORS_ALLOW_ORIGINS", ""))
