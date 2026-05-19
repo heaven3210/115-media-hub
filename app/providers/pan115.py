@@ -469,6 +469,14 @@ def _validate_115_entry_name(value: str) -> str:
     return normalized_name
 
 
+def _build_115_indexed_fid_payload(ids: List[str]) -> Dict[str, str]:
+    return {
+        f"fid[{index}]": str(entry_id).strip()
+        for index, entry_id in enumerate(ids)
+        if str(entry_id or "").strip()
+    }
+
+
 def rename_115_entry(cookie: str, entry_id: str, new_name: str, parent_cid: str = "") -> Dict[str, Any]:
     normalized_cookie = str(cookie or "").strip()
     if not normalized_cookie:
@@ -525,8 +533,7 @@ def move_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_
             "User-Agent": "Mozilla/5.0 115-media-hub",
         }
         payload = {"pid": target_id}
-        for index, entry_id in enumerate(ids):
-            payload[f"fid[{index}]"] = entry_id
+        payload.update(_build_115_indexed_fid_payload(ids))
         response = http_request_form_json(
             "https://webapi.115.com/files/move",
             payload,
@@ -568,8 +575,7 @@ def copy_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_
             "User-Agent": "Mozilla/5.0 115-media-hub",
         }
         payload = {"pid": target_id}
-        for index, entry_id in enumerate(ids):
-            payload[f"fid[{index}]"] = entry_id
+        payload.update(_build_115_indexed_fid_payload(ids))
         response = http_request_form_json(
             "https://webapi.115.com/files/copy",
             payload,
@@ -627,18 +633,20 @@ def _request_115_delete_payload(
         "Origin": "https://115.com",
         "User-Agent": "Mozilla/5.0 115-media-hub",
     }
-    id_field = "file_ids" if use_app_endpoint else "fid"
-    payload = {id_field: ",".join(ids)}
-    if parent_cid:
-        payload["pid"] = parent_cid
     if use_app_endpoint:
-        payload["user_id"] = ""
+        payload = {"file_ids": ",".join(ids), "user_id": ""}
+        if parent_cid:
+            payload["pid"] = parent_cid
         return http_request_form_json(
             "https://proapi.115.com/android/rb/delete",
             payload,
             timeout=60,
             extra_headers=headers,
         )
+    payload = _build_115_indexed_fid_payload(ids)
+    payload["ignore_warn"] = "1"
+    if parent_cid:
+        payload["pid"] = parent_cid
     return http_request_form_json(
         "https://webapi.115.com/rb/delete",
         payload,

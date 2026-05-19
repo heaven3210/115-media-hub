@@ -38,6 +38,7 @@ const state = {
     tmdb: null,
     manualBusy: false,
     manualResults: [],
+    manualMediaTypeTouched: false,
     planBusy: false,
     plan: null,
     planSelections: new Set(),
@@ -325,11 +326,24 @@ function resetIdentifyContext({ resetInputs = false } = {}) {
     state.identifySelectionKey = '';
     state.tmdb = null;
     state.manualResults = [];
+    state.manualMediaTypeTouched = false;
     if (resetInputs) {
         const manualInput = $('scraper-manual-query');
         if (manualInput) manualInput.value = '';
         const mediaSelect = $('scraper-manual-media-type');
         if (mediaSelect) mediaSelect.value = 'movie';
+    }
+}
+
+function applyIdentifyManualSearchDefaults(identifyResult = {}) {
+    const data = identifyResult && typeof identifyResult === 'object' ? identifyResult : {};
+    const manualInput = $('scraper-manual-query');
+    if (manualInput && !String(manualInput.value || '').trim() && data.query) {
+        manualInput.value = String(data.query || '');
+    }
+    const mediaSelect = $('scraper-manual-media-type');
+    if (mediaSelect && data.media_type && !state.manualMediaTypeTouched) {
+        mediaSelect.value = data.media_type === 'tv' ? 'tv' : 'movie';
     }
 }
 
@@ -1105,14 +1119,6 @@ function renderIdentify() {
             }).join('');
         }
     }
-    const manualInput = $('scraper-manual-query');
-    if (manualInput && !String(manualInput.value || '').trim() && identifyResult.query) {
-        manualInput.value = String(identifyResult.query || '');
-    }
-    const mediaSelect = $('scraper-manual-media-type');
-    if (mediaSelect && identifyResult.media_type) {
-        mediaSelect.value = identifyResult.media_type === 'tv' ? 'tv' : 'movie';
-    }
     syncSeasonControl();
     syncEpisodeModeControl();
     syncFileInfoControls();
@@ -1591,10 +1597,7 @@ async function identifySelected() {
         state.identifyResult = data || {};
         state.tmdb = null;
         state.identifySelectionKey = selectionKey;
-        const manualInput = $('scraper-manual-query');
-        if (manualInput && data?.query) manualInput.value = String(data.query || '');
-        const mediaSelect = $('scraper-manual-media-type');
-        if (mediaSelect && data?.media_type) mediaSelect.value = data.media_type === 'tv' ? 'tv' : 'movie';
+        applyIdentifyManualSearchDefaults(data || {});
         showToast('已推荐关键词，请手动搜索并绑定 TMDB 条目', {
             tone: 'info',
             duration: 2600,
@@ -1626,6 +1629,7 @@ async function bindTmdbCandidate(item) {
         if (state.tmdb?.tmdb_media_type) {
             const mediaSelect = $('scraper-manual-media-type');
             if (mediaSelect) mediaSelect.value = state.tmdb.tmdb_media_type === 'tv' ? 'tv' : 'movie';
+            state.manualMediaTypeTouched = false;
             const seasonInput = $('scraper-season');
             if (seasonInput && state.tmdb.tmdb_media_type === 'tv') {
                 const maxSeason = getTmdbSeasonCount(state.tmdb);
@@ -2008,8 +2012,11 @@ function handleChange(event) {
         return;
     }
     if (event.target?.id === 'scraper-manual-media-type') {
+        state.manualMediaTypeTouched = true;
+        state.manualResults = [];
         syncSeasonControl();
         syncEpisodeModeControl();
+        renderIdentify();
         return;
     }
     if (event.target?.id === 'scraper-episode-mode') {
