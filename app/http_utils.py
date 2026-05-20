@@ -1,3 +1,4 @@
+import gzip
 import json
 import urllib.parse
 import urllib.request
@@ -23,6 +24,19 @@ def build_http_opener(proxy_url: str = ""):
     return urllib.request.build_opener()
 
 
+def decode_response_body(resp) -> str:
+    """Read HTTP response body, handling gzip compression transparently."""
+    raw = resp.read()
+    content_encoding = (resp.headers.get("Content-Encoding") or "").strip().lower()
+    if content_encoding == "gzip" or (len(raw) >= 2 and raw[:2] == b'\x1f\x8b'):
+        try:
+            raw = gzip.decompress(raw)
+        except Exception:
+            pass
+    charset = resp.headers.get_content_charset() or "utf-8"
+    return raw.decode(charset, errors="ignore")
+
+
 def http_request_json(
     url: str,
     method: str = "GET",
@@ -44,9 +58,18 @@ def http_request_json(
         headers["Authorization"] = token
     req = urllib.request.Request(normalized_url, data=data, headers=headers, method=method)
     with build_http_opener(proxy_url).open(req, timeout=timeout) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        body = resp.read().decode(charset, errors="ignore")
-    return json.loads(body or "{}")
+        body = decode_response_body(resp)
+    stripped = (body or "").strip()
+    if not stripped:
+        return {}
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        preview = stripped[:200].replace('\n', ' ').replace('\r', '')
+        raise json.JSONDecodeError(
+            f"响应不是 JSON（前 200 字符）: {preview}",
+            doc=stripped, pos=0,
+        )
 
 
 def http_request_form_json(
@@ -64,9 +87,11 @@ def http_request_form_json(
     encoded = urllib.parse.urlencode({k: "" if v is None else str(v) for k, v in form_data.items()}).encode("utf-8")
     req = urllib.request.Request(normalized_url, data=encoded, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        body = resp.read().decode(charset, errors="ignore")
-    return json.loads(body or "{}")
+        body = decode_response_body(resp)
+    stripped = (body or "").strip()
+    if not stripped:
+        return {}
+    return json.loads(stripped)
 
 
 def http_request_text(
@@ -79,8 +104,7 @@ def http_request_text(
     headers = dict(extra_headers or {})
     req = urllib.request.Request(normalized_url, headers=headers, method="GET")
     with build_http_opener(proxy_url).open(req, timeout=timeout) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        return resp.read().decode(charset, errors="ignore")
+        return decode_response_body(resp)
 
 
 def http_request_text_with_final_url(
@@ -93,8 +117,7 @@ def http_request_text_with_final_url(
     headers = dict(extra_headers or {})
     req = urllib.request.Request(normalized_url, headers=headers, method="GET")
     with build_http_opener(proxy_url).open(req, timeout=timeout) as resp:
-        charset = resp.headers.get_content_charset() or "utf-8"
-        body = resp.read().decode(charset, errors="ignore")
+        body = decode_response_body(resp)
         return body, str(resp.geturl() or normalized_url)
 
 

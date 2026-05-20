@@ -151,6 +151,11 @@ def tmdb_request_json(
         if proxy_url:
             raise RuntimeError(f"TMDB 网络异常（代理 {proxy_url}）：{reason}") from exc
         raise RuntimeError(f"TMDB 网络异常：{reason}") from exc
+    except json.JSONDecodeError as exc:
+        preview = str(exc).split("响应不是 JSON（前 200 字符）:")[-1].strip() if "响应不是 JSON" in str(exc) else ""
+        if preview:
+            raise RuntimeError(f"TMDB 返回内容不是有效 JSON（可能代理或网络异常）：{preview[:100]}") from exc
+        raise RuntimeError("TMDB 返回内容不是有效 JSON（可能代理或网络异常）") from exc
     except Exception as exc:
         raise RuntimeError(f"TMDB 请求失败：{exc}") from exc
 
@@ -226,16 +231,18 @@ def search_tmdb_media(
     query: str,
     media_type: str = "",
     year: str = "",
+    page: int = 1,
     cfg: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     keyword = re.sub(r"\s+", " ", str(query or "").strip())
     if not keyword:
-        return []
+        return {"items": [], "page": 1, "total_pages": 1}
 
     normalized_year = normalize_tmdb_year(year)
     normalized_media_type = normalize_tmdb_media_type(media_type, fallback="")
+    normalized_page = max(1, min(1000, int(page or 1)))
     endpoint = f"/search/{normalized_media_type}" if normalized_media_type else "/search/multi"
-    params: Dict[str, Any] = {"query": keyword, "include_adult": "false", "page": "1"}
+    params: Dict[str, Any] = {"query": keyword, "include_adult": "false", "page": str(normalized_page)}
     if normalized_year:
         if normalized_media_type == "movie":
             params["year"] = normalized_year
@@ -243,6 +250,7 @@ def search_tmdb_media(
             params["first_air_date_year"] = normalized_year
     payload = tmdb_request_json(endpoint, params=params, cfg=cfg)
     raw_results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+    total_pages = max(1, min(1000, int(payload.get("total_pages", 1) or 1)))
 
     items: List[Dict[str, Any]] = []
     seen: Set[str] = set()
@@ -271,7 +279,208 @@ def search_tmdb_media(
         )
 
     items.sort(key=sort_key, reverse=True)
-    return items[: TMDB_SEARCH_LIMIT]
+    return {"items": items[: TMDB_SEARCH_LIMIT], "page": normalized_page, "total_pages": total_pages}
+
+
+def get_tmdb_trending(
+    media_type: str = "all",
+    time_window: str = "week",
+    page: int = 1,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized_media_type = normalize_tmdb_media_type(media_type, fallback="all")
+    if normalized_media_type not in ("all", "movie", "tv"):
+        normalized_media_type = "all"
+    normalized_window = str(time_window or "week").strip().lower()
+    if normalized_window not in ("day", "week"):
+        normalized_window = "week"
+    normalized_page = max(1, min(1000, int(page or 1)))
+
+    payload = tmdb_request_json(
+        f"/trending/{normalized_media_type}/{normalized_window}",
+        params={"page": str(normalized_page)},
+        cfg=cfg,
+    )
+    raw_results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+    total_pages = max(1, min(1000, int(payload.get("total_pages", 1) or 1)))
+
+    items: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for raw_item in raw_results:
+        item = normalize_tmdb_result_item(raw_item if isinstance(raw_item, dict) else {}, "")
+        if not item:
+            continue
+        media = normalize_tmdb_media_type(item.get("media_type", ""), fallback="")
+        if media not in ("movie", "tv"):
+            continue
+        key = f"{media}:{int(item.get('id', 0) or 0)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+
+    return {"items": items[: TMDB_SEARCH_LIMIT], "page": normalized_page, "total_pages": total_pages}
+
+
+def get_tmdb_popular(
+    media_type: str = "movie",
+    page: int = 1,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized_media_type = normalize_tmdb_media_type(media_type, fallback="movie")
+    if normalized_media_type not in ("movie", "tv"):
+        normalized_media_type = "movie"
+    normalized_page = max(1, min(500, int(page or 1)))
+
+    payload = tmdb_request_json(
+        f"/{normalized_media_type}/popular",
+        params={"page": str(normalized_page)},
+        cfg=cfg,
+    )
+    raw_results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+    total_pages = max(1, min(500, int(payload.get("total_pages", 1) or 1)))
+
+    items: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for raw_item in raw_results:
+        item = normalize_tmdb_result_item(raw_item if isinstance(raw_item, dict) else {}, normalized_media_type)
+        if not item:
+            continue
+        media = normalize_tmdb_media_type(item.get("media_type", ""), fallback=normalized_media_type)
+        if media not in ("movie", "tv"):
+            continue
+        key = f"{media}:{int(item.get('id', 0) or 0)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+
+    return {"items": items[: TMDB_SEARCH_LIMIT], "page": normalized_page, "total_pages": total_pages}
+
+
+def get_tmdb_genre_list(
+    media_type: str = "movie",
+    cfg: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    normalized_media_type = normalize_tmdb_media_type(media_type, fallback="movie")
+    if normalized_media_type not in ("movie", "tv"):
+        normalized_media_type = "movie"
+
+    payload = tmdb_request_json(
+        f"/genre/{normalized_media_type}/list",
+        params={},
+        cfg=cfg,
+    )
+    raw_genres = payload.get("genres", []) if isinstance(payload.get("genres"), list) else []
+    genres: List[Dict[str, Any]] = []
+    for raw_genre in raw_genres:
+        if not isinstance(raw_genre, dict):
+            continue
+        genre_id = max(0, parse_int(raw_genre.get("id", 0), 0))
+        genre_name = str(raw_genre.get("name", "") or "").strip()
+        if genre_id > 0 and genre_name:
+            genres.append({"id": genre_id, "name": genre_name})
+    return genres
+
+
+def discover_tmdb_media(
+    media_type: str = "movie",
+    genres: str = "",
+    sort_by: str = "popularity.desc",
+    vote_average_gte: float = 0,
+    primary_release_year: str = "",
+    page: int = 1,
+    cfg: Optional[Dict[str, Any]] = None,
+    with_original_language: str = "",
+    primary_release_date_gte: str = "",
+    primary_release_date_lte: str = "",
+    vote_count_gte: int = 0,
+    with_runtime_gte: int = 0,
+    with_runtime_lte: int = 0,
+) -> Dict[str, Any]:
+    normalized_media_type = normalize_tmdb_media_type(media_type, fallback="movie")
+    if normalized_media_type not in ("movie", "tv"):
+        normalized_media_type = "movie"
+    normalized_page = max(1, min(500, int(page or 1)))
+
+    valid_sort_options = ("popularity.desc", "popularity.asc", "vote_average.desc", "vote_average.asc",
+                          "primary_release_date.desc", "primary_release_date.asc",
+                          "first_air_date.desc", "first_air_date.asc")
+    normalized_sort = sort_by if sort_by in valid_sort_options else "popularity.desc"
+
+    params: Dict[str, Any] = {
+        "page": str(normalized_page),
+        "sort_by": normalized_sort,
+        "include_adult": "false",
+    }
+
+    if genres:
+        genre_ids = ",".join(g.strip() for g in str(genres).split(",") if g.strip().isdigit())
+        if genre_ids:
+            params["with_genres"] = genre_ids
+
+    if vote_average_gte and float(vote_average_gte) > 0:
+        params["vote_average.gte"] = str(min(10, max(0, float(vote_average_gte))))
+
+    # 日期范围优先于单一年份
+    has_date_range = bool(primary_release_date_gte or primary_release_date_lte)
+    if has_date_range:
+        date_gte = normalize_tmdb_year(primary_release_date_gte)
+        date_lte = normalize_tmdb_year(primary_release_date_lte)
+        if normalized_media_type == "movie":
+            if date_gte:
+                params["primary_release_date.gte"] = f"{date_gte}-01-01"
+            if date_lte:
+                params["primary_release_date.lte"] = f"{date_lte}-12-31"
+        else:
+            if date_gte:
+                params["first_air_date.gte"] = f"{date_gte}-01-01"
+            if date_lte:
+                params["first_air_date.lte"] = f"{date_lte}-12-31"
+    else:
+        year_str = normalize_tmdb_year(primary_release_year)
+        if year_str:
+            if normalized_media_type == "movie":
+                params["primary_release_year"] = year_str
+            else:
+                params["first_air_date_year"] = year_str
+
+    if with_original_language and with_original_language.strip():
+        params["with_original_language"] = with_original_language.strip()
+
+    if vote_count_gte and int(vote_count_gte) > 0:
+        params["vote_count.gte"] = str(int(vote_count_gte))
+
+    if with_runtime_gte and int(with_runtime_gte) > 0:
+        params["with_runtime.gte"] = str(int(with_runtime_gte))
+    if with_runtime_lte and int(with_runtime_lte) > 0:
+        params["with_runtime.lte"] = str(int(with_runtime_lte))
+
+    payload = tmdb_request_json(
+        f"/discover/{normalized_media_type}",
+        params=params,
+        cfg=cfg,
+    )
+    raw_results = payload.get("results", []) if isinstance(payload.get("results"), list) else []
+    total_pages = max(1, min(500, int(payload.get("total_pages", 1) or 1)))
+
+    items: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for raw_item in raw_results:
+        item = normalize_tmdb_result_item(raw_item if isinstance(raw_item, dict) else {}, normalized_media_type)
+        if not item:
+            continue
+        media = normalize_tmdb_media_type(item.get("media_type", ""), fallback=normalized_media_type)
+        if media not in ("movie", "tv"):
+            continue
+        key = f"{media}:{int(item.get('id', 0) or 0)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+
+    return {"items": items[: TMDB_SEARCH_LIMIT], "page": normalized_page, "total_pages": total_pages}
+
 
 def build_tmdb_aliases(detail: Dict[str, Any], media_type: str) -> List[str]:
     aliases: List[str] = []

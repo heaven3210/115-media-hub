@@ -28,7 +28,12 @@
       "Bash(cp -r doc/superpowers/specs/* docs/superpowers/specs/)",
       "Bash(awk 'NR>1 && /^229[0-9]|^23[0-9][0-9]/')",
       "Bash(awk -F: '$1 > 2295 && $1 < 2350')",
-      "Bash(awk '/^def normalize_config/{start=NR} start && /^def / && NR>start{print start\"-\"NR-1; exit}' /Users/xianer/Documents/code/115-media-hub/app/core.py)"
+      "Bash(awk '/^def normalize_config/{start=NR} start && /^def / && NR>start{print start\"-\"NR-1; exit}' /Users/xianer/Documents/code/115-media-hub/app/core.py)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall app main.py)",
+      "Bash(node -c static/js/modules/tabs/recommendation.js)",
+      "Bash(node -c static/js/modules/recommendation/core.js)",
+      "Bash(node -c /Users/xianer/Documents/code/115-media-hub/static/js/modules/recommendation/core.js)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache /Users/xianer/Documents/code/115-media-hub/.venv/bin/python -m compileall app main.py)"
     ]
   }
 }

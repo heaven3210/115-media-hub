@@ -4,6 +4,7 @@ from .core import app, require_auth
 from .routes.events import router as events_router
 from .routes.monitor import router as monitor_router
 from .routes.pages import router as pages_router
+from .routes.recommendation import router as recommendation_router
 from .routes.resource import router as resource_router
 from .routes.scraper import router as scraper_router
 from .routes.settings import router as settings_router
@@ -24,6 +25,7 @@ app.include_router(subscription_router, dependencies=_auth_deps)
 app.include_router(tmdb_router, dependencies=_auth_deps)
 app.include_router(events_router, dependencies=_auth_deps)
 app.include_router(monitor_router, dependencies=_auth_deps)
+app.include_router(recommendation_router, dependencies=_auth_deps)
 
 from . import startup  # noqa: E402,F401
 

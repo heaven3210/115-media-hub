@@ -678,7 +678,7 @@ RESOURCE_STATE_SNAPSHOT_CACHE_MAX_ENTRIES = max(
 TMDB_API_BASE_URL = os.environ.get("TMDB_API_BASE_URL", "https://api.themoviedb.org/3").strip().rstrip("/")
 TMDB_IMAGE_BASE_URL = os.environ.get("TMDB_IMAGE_BASE_URL", "https://image.tmdb.org/t/p").strip().rstrip("/")
 TMDB_REQUEST_TIMEOUT_SECONDS = max(5, int(os.environ.get("TMDB_REQUEST_TIMEOUT_SECONDS", 20) or 20))
-TMDB_SEARCH_LIMIT = max(1, min(20, int(os.environ.get("TMDB_SEARCH_LIMIT", 12) or 12)))
+TMDB_SEARCH_LIMIT = max(1, min(20, int(os.environ.get("TMDB_SEARCH_LIMIT", 20) or 20)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 FAVICON_PATH = os.path.join(STATIC_DIR, "icons", "favicon.svg")
 USERSCRIPT_MAGNET_HELPER_PATH = os.path.join(BASE_DIR, "115-magnet-helper-webhook.user.js")
@@ -6533,8 +6533,12 @@ from .providers.tmdb import (
     build_tmdb_aliases,
     build_tmdb_cache_key,
     build_tmdb_image_url,
+    discover_tmdb_media,
+    get_tmdb_genre_list,
     get_tmdb_media_detail,
+    get_tmdb_popular,
     get_tmdb_runtime_config,
+    get_tmdb_trending,
     infer_tmdb_episode_mode,
     normalize_tmdb_result_item,
     parse_tmdb_http_error,

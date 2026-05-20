@@ -89,6 +89,875 @@
         .btn-disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; filter: grayscale(1); }
         .group-card { background: linear-gradient(180deg, rgba(30,41,59,0.96), rgba(15,23,42,0.96)); border: 1px solid #334155; border-radius: 1.5rem; padding: 1.5rem; box-shadow: 0 10px 28px rgba(2, 6, 23, 0.35); }
         .group-title { color: #38bdf8; font-weight: 800; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.25rem; border-left: 4px solid #38bdf8; padding-left: 0.75rem; }
+        /* ── Recommendation Grid ── */
+        .rec-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.875rem;
+        }
+        @media (min-width: 640px) { .rec-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 768px) { .rec-grid { grid-template-columns: repeat(4, 1fr); } }
+        @media (min-width: 1024px) { .rec-grid { grid-template-columns: repeat(5, 1fr); } }
+        @media (min-width: 1280px) { .rec-grid { grid-template-columns: repeat(6, 1fr); } }
+
+        /* ── Recommendation Card ── */
+        .rec-card {
+            position: relative;
+            border-radius: 0.875rem;
+            border: 1px solid rgba(51, 65, 85, 0.7);
+            background: rgba(15, 23, 42, 0.6);
+            overflow: hidden;
+            transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .rec-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(100, 116, 139, 0.5);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        }
+        .rec-card-poster-wrap {
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .rec-card-poster-wrap img {
+            display: block;
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            background: #0f172a;
+            transition: transform 0.35s ease;
+        }
+        .rec-card:hover .rec-card-poster-wrap img {
+            transform: scale(1.04);
+        }
+        .rec-card-poster-placeholder {
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            color: #475569;
+        }
+        .rec-card-poster-placeholder svg {
+            width: 2rem;
+            height: 2rem;
+        }
+        .rec-card-vote {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 9999px;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+        }
+        .rec-card-vote svg { width: 0.75rem; height: 0.75rem; color: #fbbf24; }
+        .rec-card-vote span { font-size: 0.6875rem; font-weight: 700; color: #fde68a; }
+        .rec-card-status-badge {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.5rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.625rem;
+            font-weight: 700;
+            backdrop-filter: blur(8px);
+        }
+        .rec-card-info {
+            padding: 0.625rem 0.75rem 0;
+            flex: 1;
+        }
+        .rec-card-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #f8fafc;
+            line-height: 1.35;
+            min-height: 2rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            cursor: pointer;
+            transition: color 0.18s ease;
+        }
+        .rec-card-title:hover { color: #7dd3fc; }
+        .rec-card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.625rem;
+            line-height: 1;
+            margin-top: 0.375rem;
+        }
+        .rec-card-meta-tag {
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.25rem;
+            background: rgba(30, 41, 59, 0.8);
+        }
+        .rec-card-meta-text { color: #64748b; }
+        .rec-card-overview {
+            font-size: 0.6875rem;
+            color: #64748b;
+            line-height: 1.5;
+            margin-top: 0.375rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .rec-card-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+            padding: 0 0.75rem 0.75rem;
+        }
+        .rec-card-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 0.4rem 0.375rem;
+            border-radius: 0.5rem;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-align: center;
+            white-space: nowrap;
+            line-height: 1.3;
+            min-height: 2rem;
+            transition: background-color 0.18s ease, color 0.18s ease;
+        }
+        @media (min-width: 640px) {
+            .rec-card-info { padding: 0.75rem 0.875rem 0; flex: 1; }
+            .rec-card-title { font-size: 0.8125rem; min-height: 2.2rem; }
+            .rec-card-meta { font-size: 0.6875rem; }
+            .rec-card-overview { font-size: 0.75rem; }
+            .rec-card-actions { padding: 0 0.875rem 0.875rem; }
+            .rec-card-btn { font-size: 0.75rem; padding: 0.4375rem 0.5rem; }
+        }
+
+        /* ── Recommendation Tab Bar ── */
+        .rec-tab-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+            padding: 0.25rem;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 1rem;
+            border: 1px solid rgba(51, 65, 85, 0.4);
+        }
+        .rec-tab-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.5rem 1rem;
+            border-radius: 0.75rem;
+            font-size: 0.8125rem;
+            font-weight: 700;
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid transparent;
+            transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+            white-space: nowrap;
+        }
+        .rec-tab-btn:hover {
+            background: rgba(51, 65, 85, 0.6);
+            color: #e2e8f0;
+        }
+        .rec-tab-btn.is-active {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(37, 99, 235, 0.15));
+            color: #7dd3fc;
+            border-color: rgba(56, 189, 248, 0.35);
+            box-shadow: 0 2px 8px rgba(14, 165, 233, 0.15);
+        }
+        .rec-tab-icon {
+            width: 1rem;
+            height: 1rem;
+            flex-shrink: 0;
+        }
+
+        /* ── Recommendation Search Strip ── */
+        .rec-search-strip {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .rec-search-input-wrap {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+        }
+        .rec-search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0.875rem;
+            height: 0.875rem;
+            color: #64748b;
+            pointer-events: none;
+        }
+        .rec-search-input {
+            width: 100%;
+            padding: 0.5rem 2rem 0.5rem 2.25rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            background: rgba(15, 23, 42, 0.4);
+            color: #e2e8f0;
+            font-size: 0.8125rem;
+            outline: none;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+        .rec-search-input::placeholder { color: #64748b; }
+        .rec-search-input:focus {
+            border-color: rgba(56, 189, 248, 0.5);
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.1);
+        }
+        .rec-search-clear {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1.25rem;
+            height: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
+            background: rgba(51, 65, 85, 0.6);
+            color: #94a3b8;
+            transition: background-color 0.18s ease, color 0.18s ease;
+        }
+        .rec-search-clear:hover { background: rgba(71, 85, 105, 0.9); color: #f8fafc; }
+        .rec-search-clear svg { width: 0.75rem; height: 0.75rem; }
+        .rec-search-select {
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            background: rgba(15, 23, 42, 0.4);
+            color: #94a3b8;
+            font-size: 0.8125rem;
+            outline: none;
+            flex-shrink: 0;
+        }
+        .rec-search-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 0.75rem;
+            background: rgba(14, 165, 233, 0.15);
+            color: #7dd3fc;
+            font-size: 0.8125rem;
+            font-weight: 700;
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            flex-shrink: 0;
+            transition: background-color 0.18s ease, color 0.18s ease;
+        }
+        .rec-search-btn:hover {
+            background: rgba(14, 165, 233, 0.25);
+            color: #bae6fd;
+        }
+
+        /* ── Recommendation Watchlist Badge ── */
+        .rec-watchlist-badge {
+            transition: background-color 0.18s ease, border-color 0.18s ease;
+        }
+
+        /* ── Recommendation Pagination ── */
+        .rec-pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.375rem;
+            padding: 1.25rem 0 0.25rem;
+            flex-wrap: wrap;
+        }
+        .rec-page-btn {
+            min-width: 2.25rem;
+            height: 2.25rem;
+            padding: 0 0.5rem;
+            border-radius: 0.625rem;
+            background: rgba(30, 41, 59, 0.6);
+            color: #94a3b8;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            cursor: pointer;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .rec-page-btn:hover:not(:disabled):not(.rec-page-active) {
+            background: rgba(51, 65, 85, 0.6);
+            color: #e2e8f0;
+            border-color: rgba(71, 85, 105, 0.6);
+        }
+        .rec-page-active {
+            background: rgba(14, 165, 233, 0.2);
+            color: #38bdf8;
+            border-color: rgba(56, 189, 248, 0.4);
+            cursor: default;
+        }
+        .rec-page-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        .rec-page-ellipsis {
+            min-width: 2.25rem;
+            height: 2.25rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-size: 0.875rem;
+            letter-spacing: 0.15em;
+            cursor: default;
+        }
+
+        /* ── Recommendation Explore Filters ── */
+        .rec-explore-filters {
+            display: flex;
+            flex-direction: column;
+            gap: 0.625rem;
+            margin-top: 0.75rem;
+        }
+        .rec-explore-row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .rec-explore-genres {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+        }
+        .rec-decade-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+        }
+        .rec-genre-chip {
+            padding: 0.3rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(30, 41, 59, 0.6);
+            color: #94a3b8;
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            cursor: pointer;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .rec-genre-chip:hover {
+            background: rgba(51, 65, 85, 0.6);
+            color: #e2e8f0;
+        }
+        .rec-genre-chip.is-selected {
+            background: rgba(14, 165, 233, 0.2);
+            color: #7dd3fc;
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+        .rec-explore-row-advanced {
+            gap: 0.75rem;
+        }
+        .rec-filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .rec-filter-label {
+            font-size: 0.65rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+        .rec-range-inputs {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .rec-range-sep {
+            color: #475569;
+            font-size: 0.75rem;
+        }
+        .rec-input-sm {
+            max-width: 5rem;
+            font-size: 0.75rem;
+            padding: 0.3rem 0.5rem;
+        }
+        .rec-btn-reset {
+            background: rgba(51, 65, 85, 0.5);
+            color: #94a3b8;
+            border: 1px solid rgba(71, 85, 105, 0.5);
+        }
+        .rec-btn-reset:hover {
+            background: rgba(71, 85, 105, 0.6);
+            color: #e2e8f0;
+        }
+
+        /* ── Recommendation Detail Modal ── */
+        .rec-detail-modal {
+            background: rgba(2, 6, 23, 0.7);
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .rec-detail-modal.hidden { display: none !important; }
+        .rec-detail-backdrop {
+            position: absolute;
+            inset: 0;
+        }
+        .rec-detail-shell {
+            position: relative;
+            width: 100%;
+            max-width: 42rem;
+            margin-top: 3vh;
+            max-height: 92vh;
+            overflow-y: auto;
+            background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+            border: 1px solid rgba(51, 65, 85, 0.8);
+            border-radius: 1.25rem;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+        }
+        .rec-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1.25rem 1.25rem 0;
+        }
+        .rec-detail-header h3 {
+            font-size: 1.125rem;
+            font-weight: 800;
+            color: #f8fafc;
+            line-height: 1.4;
+        }
+        .rec-detail-close {
+            flex-shrink: 0;
+            width: 2rem;
+            height: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.5rem;
+            background: rgba(51, 65, 85, 0.6);
+            color: #94a3b8;
+            transition: background-color 0.18s ease, color 0.18s ease;
+        }
+        .rec-detail-close:hover { background: rgba(71, 85, 105, 0.9); color: #f8fafc; }
+        .rec-detail-close svg { width: 1rem; height: 1rem; }
+        .rec-detail-body {
+            padding: 1rem 1.25rem;
+        }
+        .rec-detail-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .rec-detail-poster {
+            flex-shrink: 0;
+            align-self: center;
+        }
+        .rec-detail-poster img {
+            width: 100%;
+            max-width: 180px;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(51, 65, 85, 0.6);
+            object-fit: cover;
+        }
+        .rec-detail-poster-placeholder {
+            width: 100%;
+            max-width: 180px;
+            aspect-ratio: 2 / 3;
+            border-radius: 0.75rem;
+            border: 1px dashed rgba(51, 65, 85, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0f172a;
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+        .rec-detail-info {
+            min-width: 0;
+            flex: 1;
+        }
+        .rec-detail-original-title {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+        .rec-detail-tags {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        .rec-detail-tag-type {
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.375rem;
+            background: rgba(14, 165, 233, 0.15);
+            color: #7dd3fc;
+            font-weight: 700;
+        }
+        .rec-detail-tag-year { color: #94a3b8; }
+        .rec-detail-tag-status {
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.375rem;
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+        }
+        .rec-detail-vote {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            margin-bottom: 0.75rem;
+        }
+        .rec-detail-vote svg { width: 1.125rem; height: 1.125rem; color: #fbbf24; }
+        .rec-detail-vote-score { font-weight: 800; color: #fde68a; }
+        .rec-detail-vote-max { font-size: 0.75rem; color: #64748b; }
+        .rec-detail-overview {
+            font-size: 0.8125rem;
+            color: #cbd5e1;
+            line-height: 1.65;
+            margin-bottom: 0.75rem;
+        }
+        .rec-detail-episodes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+        .rec-detail-episodes strong { color: #f8fafc; font-weight: 700; }
+        .rec-detail-season-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+            margin-bottom: 0.5rem;
+        }
+        .rec-detail-season-chip {
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.25rem;
+            background: rgba(30, 41, 59, 0.8);
+            font-size: 0.6875rem;
+            color: #94a3b8;
+        }
+        .rec-detail-aliases {
+            margin-top: 0.75rem;
+        }
+        .rec-detail-aliases-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 0.375rem;
+        }
+        .rec-detail-aliases-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+        }
+        .rec-detail-alias-chip {
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.25rem;
+            background: rgba(30, 41, 59, 0.8);
+            font-size: 0.6875rem;
+            color: #cbd5e1;
+        }
+        .rec-detail-footer {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0.75rem 1.25rem 1.25rem;
+            border-top: 1px solid rgba(51, 65, 85, 0.4);
+        }
+        .rec-detail-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 0.625rem 0.75rem;
+            border-radius: 0.625rem;
+            font-size: 0.8125rem;
+            font-weight: 700;
+            text-align: center;
+            white-space: nowrap;
+            min-height: 2.5rem;
+            transition: background-color 0.18s ease, color 0.18s ease;
+        }
+        @media (min-width: 640px) {
+            .rec-detail-layout {
+                flex-direction: row;
+            }
+            .rec-detail-poster { align-self: flex-start; }
+            .rec-detail-poster img,
+            .rec-detail-poster-placeholder { max-width: 160px; }
+        }
+
+        /* ── Recommendation Button Variants (theme-aware) ── */
+        .rec-btn-watchlist {
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+            border: 1px solid #334155;
+        }
+        .rec-btn-watchlist:hover { background: rgba(51, 65, 85, 0.9); }
+        .rec-btn-watchlist-active {
+            background: rgba(217, 119, 6, 0.2);
+            color: #fcd34d;
+            border: 1px solid rgba(217, 119, 6, 0.3);
+        }
+        .rec-btn-search-resource {
+            background: #059669;
+            color: #fff;
+        }
+        .rec-btn-search-resource:hover { background: #10b981; }
+        .rec-btn-subscribe {
+            background: #0284c7;
+            color: #fff;
+        }
+        .rec-btn-subscribe:hover { background: #0ea5e9; }
+        .rec-btn-remove {
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+            border: 1px solid #334155;
+        }
+        .rec-btn-remove:hover { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+        .rec-detail-btn-watchlist {
+            background: rgba(51, 65, 85, 0.6);
+            color: #e2e8f0;
+            border: 1px solid #475569;
+        }
+        .rec-detail-btn-watchlist:hover { background: rgba(71, 85, 105, 0.8); }
+        .rec-detail-btn-watchlist-active {
+            background: rgba(217, 119, 6, 0.2);
+            color: #fcd34d;
+            border: 1px solid rgba(217, 119, 6, 0.3);
+        }
+        .rec-detail-btn-search {
+            background: #059669;
+            color: #fff;
+        }
+        .rec-detail-btn-search:hover { background: #10b981; }
+        .rec-detail-btn-subscribe {
+            background: #0284c7;
+            color: #fff;
+        }
+        .rec-detail-btn-subscribe:hover { background: #0ea5e9; }
+
+        /* ── Recommendation Day Mode Overrides ── */
+        html.theme-day .rec-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,249,255,0.98)) !important;
+            border-color: rgba(182, 198, 219, 0.22) !important;
+        }
+        html.theme-day .rec-card:hover {
+            border-color: rgba(148, 163, 184, 0.4) !important;
+            box-shadow: 0 12px 32px rgba(107, 131, 164, 0.16) !important;
+        }
+        html.theme-day .rec-card-poster-wrap img { background: #e2e8f0; }
+        html.theme-day .rec-card-poster-placeholder { background: #e2e8f0; color: #94a3b8; }
+        html.theme-day .rec-card-title { color: #0f172a !important; }
+        html.theme-day .rec-card-title:hover { color: #0369a1 !important; }
+        html.theme-day .rec-card-meta-tag {
+            background: rgba(226, 232, 240, 0.9) !important;
+            color: #475569 !important;
+        }
+        html.theme-day .rec-card-meta-text { color: #64748b !important; }
+        html.theme-day .rec-card-overview { color: #64748b !important; }
+        html.theme-day .rec-card-status-badge {
+            background: rgba(255,255,255,0.9) !important;
+        }
+        html.theme-day .rec-tab-bar {
+            background: rgba(226, 232, 240, 0.5) !important;
+            border-color: rgba(182, 198, 219, 0.3) !important;
+        }
+        html.theme-day .rec-tab-btn {
+            background: transparent !important;
+            color: #475569 !important;
+        }
+        html.theme-day .rec-tab-btn:hover {
+            background: rgba(203, 213, 225, 0.5) !important;
+            color: #1e293b !important;
+        }
+        html.theme-day .rec-tab-btn.is-active {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(37, 99, 235, 0.1)) !important;
+            color: #0369a1 !important;
+            border-color: rgba(14, 165, 233, 0.3) !important;
+            box-shadow: 0 2px 8px rgba(14, 165, 233, 0.1) !important;
+        }
+        html.theme-day .rec-search-input {
+            background: rgba(255, 255, 255, 0.8) !important;
+            border-color: rgba(182, 198, 219, 0.4) !important;
+            color: #0f172a !important;
+        }
+        html.theme-day .rec-search-input::placeholder { color: #94a3b8 !important; }
+        html.theme-day .rec-search-input:focus {
+            border-color: rgba(14, 165, 233, 0.5) !important;
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.08) !important;
+        }
+        html.theme-day .rec-search-icon { color: #94a3b8 !important; }
+        html.theme-day .rec-search-clear {
+            background: rgba(203, 213, 225, 0.6) !important;
+            color: #475569 !important;
+        }
+        html.theme-day .rec-search-clear:hover { background: rgba(148, 163, 184, 0.5) !important; color: #0f172a !important; }
+        html.theme-day .rec-search-select {
+            background: rgba(255, 255, 255, 0.8) !important;
+            border-color: rgba(182, 198, 219, 0.4) !important;
+            color: #475569 !important;
+        }
+        html.theme-day .rec-search-btn {
+            background: rgba(14, 165, 233, 0.12) !important;
+            color: #0369a1 !important;
+            border-color: rgba(14, 165, 233, 0.2) !important;
+        }
+        html.theme-day .rec-search-btn:hover { background: rgba(14, 165, 233, 0.2) !important; }
+        html.theme-day .rec-watchlist-badge {
+            background: rgba(241, 245, 249, 0.9) !important;
+            border-color: rgba(182, 198, 219, 0.3) !important;
+            color: #334155 !important;
+        }
+        html.theme-day .rec-detail-modal { background: rgba(15, 23, 42, 0.35) !important; }
+        html.theme-day .rec-detail-shell {
+            background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,249,255,0.98)) !important;
+            border-color: rgba(182, 198, 219, 0.3) !important;
+            box-shadow: 0 24px 64px rgba(107, 131, 164, 0.2) !important;
+        }
+        html.theme-day .rec-detail-header h3 { color: #0f172a !important; }
+        html.theme-day .rec-detail-close {
+            background: rgba(226, 232, 240, 0.8) !important;
+            color: #475569 !important;
+        }
+        html.theme-day .rec-detail-close:hover { background: rgba(203, 213, 225, 0.9) !important; color: #0f172a !important; }
+        html.theme-day .rec-detail-poster img { border-color: rgba(182, 198, 219, 0.3) !important; }
+        html.theme-day .rec-detail-poster-placeholder { background: #e2e8f0; border-color: rgba(182, 198, 219, 0.3) !important; color: #94a3b8; }
+        html.theme-day .rec-detail-original-title { color: #475569 !important; }
+        html.theme-day .rec-detail-tag-type { background: rgba(14, 165, 233, 0.12) !important; color: #0369a1 !important; }
+        html.theme-day .rec-detail-tag-year { color: #475569 !important; }
+        html.theme-day .rec-detail-tag-status { background: rgba(226, 232, 240, 0.9) !important; color: #334155 !important; }
+        html.theme-day .rec-detail-vote-score { color: #b45309 !important; }
+        html.theme-day .rec-detail-vote-max { color: #94a3b8 !important; }
+        html.theme-day .rec-detail-overview { color: #334155 !important; }
+        html.theme-day .rec-detail-episodes { color: #475569 !important; }
+        html.theme-day .rec-detail-episodes strong { color: #0f172a !important; }
+        html.theme-day .rec-detail-season-chip { background: rgba(226, 232, 240, 0.9) !important; color: #475569 !important; }
+        html.theme-day .rec-detail-aliases-label { color: #94a3b8 !important; }
+        html.theme-day .rec-detail-alias-chip { background: rgba(226, 232, 240, 0.9) !important; color: #334155 !important; }
+        html.theme-day .rec-detail-footer { border-color: rgba(182, 198, 219, 0.3) !important; }
+        html.theme-day .rec-btn-watchlist {
+            background: rgba(249, 252, 255, 0.96) !important;
+            color: #24364b !important;
+            border-color: rgba(182, 198, 219, 0.24) !important;
+        }
+        html.theme-day .rec-btn-watchlist:hover { background: rgba(226, 232, 240, 0.9) !important; }
+        html.theme-day .rec-btn-watchlist-active {
+            background: rgba(252, 243, 212, 0.96) !important;
+            color: #8a4b05 !important;
+            border-color: rgba(217, 119, 6, 0.3) !important;
+        }
+        html.theme-day .rec-btn-search-resource { background: #15803d !important; }
+        html.theme-day .rec-btn-search-resource:hover { background: #16a34a !important; }
+        html.theme-day .rec-btn-subscribe { background: #1d63e6 !important; }
+        html.theme-day .rec-btn-subscribe:hover { background: #2563eb !important; }
+        html.theme-day .rec-btn-remove {
+            background: rgba(249, 252, 255, 0.96) !important;
+            color: #24364b !important;
+            border-color: rgba(182, 198, 219, 0.24) !important;
+        }
+        html.theme-day .rec-btn-remove:hover { background: #fee2e2 !important; color: #991b1b !important; }
+        html.theme-day .rec-detail-btn-watchlist {
+            background: rgba(249, 252, 255, 0.96) !important;
+            color: #24364b !important;
+            border-color: rgba(182, 198, 219, 0.24) !important;
+        }
+        html.theme-day .rec-detail-btn-watchlist:hover { background: rgba(226, 232, 240, 0.9) !important; }
+        html.theme-day .rec-detail-btn-watchlist-active {
+            background: rgba(252, 243, 212, 0.96) !important;
+            color: #8a4b05 !important;
+            border-color: rgba(217, 119, 6, 0.3) !important;
+        }
+        html.theme-day .rec-detail-btn-search { background: #15803d !important; }
+        html.theme-day .rec-detail-btn-search:hover { background: #16a34a !important; }
+        html.theme-day .rec-detail-btn-subscribe { background: #1d63e6 !important; }
+        html.theme-day .rec-detail-btn-subscribe:hover { background: #2563eb !important; }
+        /* ── theme-day: explore filters ── */
+        html.theme-day .rec-explore-filters {
+            background: rgba(241, 245, 249, 0.6) !important;
+            border-color: rgba(182, 198, 219, 0.3) !important;
+        }
+        html.theme-day .rec-filter-label { color: #64748b !important; }
+        html.theme-day .rec-search-select {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: rgba(182, 198, 219, 0.5) !important;
+        }
+        html.theme-day .rec-search-select:focus {
+            border-color: rgba(14, 165, 233, 0.4) !important;
+            box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.12) !important;
+        }
+        html.theme-day .rec-input-sm {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: rgba(182, 198, 219, 0.5) !important;
+        }
+        html.theme-day .rec-input-sm:focus {
+            border-color: rgba(14, 165, 233, 0.4) !important;
+        }
+        html.theme-day .rec-input-sm::placeholder { color: #94a3b8 !important; }
+        html.theme-day .rec-range-sep { color: #94a3b8 !important; }
+        html.theme-day .rec-btn-reset {
+            background: rgba(226, 232, 240, 0.7) !important;
+            color: #475569 !important;
+            border-color: rgba(182, 198, 219, 0.5) !important;
+        }
+        html.theme-day .rec-btn-reset:hover {
+            background: rgba(203, 213, 225, 0.8) !important;
+            color: #0f172a !important;
+        }
+        /* ── theme-day: genre chips ── */
+        html.theme-day .rec-genre-chip {
+            background: rgba(241, 245, 249, 0.8) !important;
+            color: #475569 !important;
+            border-color: rgba(182, 198, 219, 0.5) !important;
+        }
+        html.theme-day .rec-genre-chip:hover {
+            background: rgba(226, 232, 240, 0.9) !important;
+            color: #0f172a !important;
+        }
+        html.theme-day .rec-genre-chip.is-selected {
+            background: rgba(14, 165, 233, 0.12) !important;
+            color: #0369a1 !important;
+            border-color: rgba(14, 165, 233, 0.3) !important;
+        }
+        /* ── theme-day: pagination ── */
+        html.theme-day .rec-page-btn {
+            background: rgba(241, 245, 249, 0.8) !important;
+            color: #475569 !important;
+            border-color: rgba(182, 198, 219, 0.5) !important;
+        }
+        html.theme-day .rec-page-btn:hover:not(:disabled):not(.rec-page-active) {
+            background: rgba(226, 232, 240, 0.9) !important;
+            color: #0f172a !important;
+            border-color: rgba(148, 163, 184, 0.6) !important;
+        }
+        html.theme-day .rec-page-active {
+            background: rgba(14, 165, 233, 0.12) !important;
+            color: #0369a1 !important;
+            border-color: rgba(14, 165, 233, 0.3) !important;
+        }
+        html.theme-day .rec-page-btn:disabled { opacity: 0.4 !important; }
+        html.theme-day .rec-page-ellipsis { color: #94a3b8 !important; }
+        /* ── theme-day: empty/error state ── */
+        html.theme-day .rec-empty-error { color: #dc2626 !important; }
+        html.theme-day .rec-empty-error-text { color: #991b1b !important; }
+        html.theme-day .rec-empty-hint { color: #64748b !important; }
         .monitor-page-head {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(28rem, 42rem);
@@ -9238,7 +10107,7 @@
 
             .shell-mobile-nav {
                 display: grid;
-                grid-template-columns: repeat(6, minmax(0, 1fr));
+                grid-template-columns: repeat(7, minmax(0, 1fr));
                 gap: 8px;
                 position: sticky;
                 bottom: 12px;
@@ -10614,7 +11483,7 @@
                 padding: 8px;
                 border-radius: 26px;
                 display: grid;
-                grid-template-columns: repeat(6, minmax(0, 1fr));
+                grid-template-columns: repeat(7, minmax(0, 1fr));
                 gap: 8px;
             }
 
@@ -12431,7 +13300,7 @@
 
         @media (max-width: 1023px) {
             .shell-mobile-nav {
-                grid-template-columns: repeat(6, minmax(0, 1fr));
+                grid-template-columns: repeat(7, minmax(0, 1fr));
                 gap: 6px;
             }
 

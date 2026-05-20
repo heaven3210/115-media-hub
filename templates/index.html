@@ -52,6 +52,14 @@
                     </span>
                     <span class="shell-nav-btn-label">资源中心</span>
                 </button>
+                <button type="button" id="tab-recommendation" data-tab-target="recommendation" data-module-nav="recommendation" class="shell-nav-btn" onclick="switchTab('recommendation')">
+                    <span class="shell-nav-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="shell-nav-btn-label">资源推荐</span>
+                </button>
                 <button type="button" id="tab-subscription" data-tab-target="subscription" data-module-nav="subscription" class="shell-nav-btn" onclick="switchTab('subscription')">
                     <span class="shell-nav-btn-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none">
@@ -162,6 +170,7 @@
         {% include "partials/pages/task.html" %}
         {% include "partials/pages/resource.html" %}
         {% include "partials/pages/scraper.html" %}
+        {% include "partials/pages/recommendation.html" %}
         {% include "partials/pages/subscription.html" %}
         {% include "partials/pages/settings.html" %}
         {% include "partials/pages/monitor_about.html" %}
@@ -182,6 +191,14 @@
                         </svg>
                     </span>
                     <span class="shell-mobile-btn-label">资源</span>
+                </button>
+                <button type="button" class="shell-mobile-btn" data-tab-target="recommendation" data-module-nav="recommendation" onclick="switchTab('recommendation')">
+                    <span class="shell-mobile-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="shell-mobile-btn-label">推荐</span>
                 </button>
                 <button type="button" class="shell-mobile-btn" data-tab-target="subscription" data-module-nav="subscription" onclick="switchTab('subscription')">
                     <span class="shell-mobile-btn-icon" aria-hidden="true">
@@ -253,6 +270,7 @@
     <script src="/static/js/modules/resource/browser.js?v={{ asset_version }}"></script>
     <script src="/static/js/modules/resource/jobs.js?v={{ asset_version }}"></script>
     <script src="/static/js/modules/subscription/ui.js?v={{ asset_version }}"></script>
+    <script src="/static/js/modules/recommendation/core.js?v={{ asset_version }}"></script>
     <script src="/static/js/modules/resource/core.js?v={{ asset_version }}"></script>
     <script src="/static/js/modules/resource/source-manager.js?v={{ asset_version }}"></script>
     <script src="/static/js/modules/resource/job-modal.js?v={{ asset_version }}"></script>

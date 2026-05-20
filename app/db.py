@@ -318,6 +318,26 @@ def ensure_db() -> None:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS recommendation_watchlist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tmdb_id INTEGER NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'movie',
+                    title TEXT NOT NULL,
+                    original_title TEXT DEFAULT '',
+                    year TEXT DEFAULT '',
+                    poster_url TEXT DEFAULT '',
+                    overview TEXT DEFAULT '',
+                    vote_average REAL DEFAULT 0,
+                    tmdb_detail_json TEXT DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'want',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(tmdb_id, media_type)
+                )
+                """
+            )
             cursor.execute("PRAGMA table_info(resource_jobs)")
             job_columns = {str(row[1]) for row in cursor.fetchall()}
             if "extra_json" not in job_columns:

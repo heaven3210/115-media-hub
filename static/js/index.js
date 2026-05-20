@@ -196,6 +196,7 @@
         let resourceStateHydrated = false;
         const moduleScrollTopState = {
             resource: 0,
+            recommendation: 0,
             subscription: 0,
             scraper: 0,
             monitor: 0,
@@ -217,6 +218,7 @@
         let viewportMetricsRafId = 0;
         const moduleVisitState = {
             resource: true,
+            recommendation: false,
             subscription: false,
             scraper: false,
             monitor: false,
@@ -226,6 +228,7 @@
         };
         const SHELL_TAB_META = {
             resource: { title: '资源中心' },
+            recommendation: { title: '资源推荐' },
             subscription: { title: '影视订阅' },
             scraper: { title: '刮削管理' },
             monitor: { title: '文件夹监控' },
@@ -415,6 +418,10 @@
 
         async function loadResourceTabModule() {
             return loadTabModule('resource');
+        }
+
+        async function loadRecommendationTabModule() {
+            return loadTabModule('recommendation');
         }
 
         async function loadAboutTabModule() {

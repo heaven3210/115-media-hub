@@ -16,6 +16,7 @@ function withTabModuleImportQuery(path) {
 
 export const TAB_MODULE_IMPORT_PATHS = Object.freeze({
     resource: withTabModuleImportQuery('/static/js/modules/tabs/resource.js'),
+    recommendation: withTabModuleImportQuery('/static/js/modules/tabs/recommendation.js'),
     subscription: withTabModuleImportQuery('/static/js/modules/tabs/subscription.js'),
     scraper: withTabModuleImportQuery('/static/js/modules/tabs/scraper.js'),
     monitor: withTabModuleImportQuery('/static/js/modules/tabs/monitor.js'),
