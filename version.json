@@ -1,8 +1,8 @@
 {
-  "version": "0.4.1",
-  "buildDate": "2026-05-19T00:00:00+08:00",
+  "version": "0.4.2",
+  "buildDate": "2026-05-20T00:00:00+08:00",
   "notes": [
-    "修复资源中心筛选栏在窄屏幕下被压缩导致背景和文字异常的问题"
+    "重构资源推荐页筛选与推荐卡片布局，优化移动端体验并统一卡片高度"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

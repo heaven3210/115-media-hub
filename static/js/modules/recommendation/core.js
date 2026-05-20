@@ -17,6 +17,42 @@ let recommendationPagination = {
 
 let exploreGenres = { movie: [], tv: [] };
 let exploreGenresLoaded = { movie: false, tv: false };
+const EXPLORE_COMPACT_BREAKPOINT = 1180;
+const EXPLORE_DEFAULT_FILTERS = Object.freeze({
+    mediaType: 'movie',
+    sortBy: 'popularity.desc',
+    language: '',
+    decade: '',
+    rating: '',
+    voteCount: '',
+    runtimeGte: '',
+    runtimeLte: '',
+    genres: [],
+});
+
+let exploreFilterState = getDefaultExploreFilters();
+let exploreDrawerOpen = false;
+
+function getDefaultExploreFilters() {
+    return {
+        mediaType: EXPLORE_DEFAULT_FILTERS.mediaType,
+        sortBy: EXPLORE_DEFAULT_FILTERS.sortBy,
+        language: EXPLORE_DEFAULT_FILTERS.language,
+        decade: EXPLORE_DEFAULT_FILTERS.decade,
+        rating: EXPLORE_DEFAULT_FILTERS.rating,
+        voteCount: EXPLORE_DEFAULT_FILTERS.voteCount,
+        runtimeGte: EXPLORE_DEFAULT_FILTERS.runtimeGte,
+        runtimeLte: EXPLORE_DEFAULT_FILTERS.runtimeLte,
+        genres: [],
+    };
+}
+
+function setRecommendationContentHeader(title, subtitle) {
+    const titleEl = document.getElementById('recommendation-content-title');
+    const subtitleEl = document.getElementById('recommendation-content-subtitle');
+    if (titleEl) titleEl.innerText = title;
+    if (subtitleEl) subtitleEl.innerText = subtitle || '';
+}
 
 function setRecommendationBusy(busy) {
     recommendationBusy = !!busy;
@@ -36,15 +72,223 @@ function setActiveRecTab(tabKey) {
     document.querySelectorAll('.rec-tab-btn').forEach((btn) => {
         btn.classList.toggle('is-active', btn.dataset.recTab === tabKey);
     });
-    const searchStrip = document.querySelector('.rec-search-strip');
+    const pageEl = document.getElementById('page-recommendation');
+    const workspaceEl = document.getElementById('recommendation-workspace');
+    const searchToolbar = document.getElementById('recommendation-standard-toolbar');
+    const quickbar = document.getElementById('rec-explore-mobile-quickbar');
     const exploreFilters = document.getElementById('rec-explore-filters');
-    if (tabKey === 'explore') {
-        if (searchStrip) searchStrip.classList.add('hidden');
+    const isExplore = tabKey === 'explore';
+
+    pageEl?.classList.toggle('is-explore', isExplore);
+    workspaceEl?.classList.toggle('is-explore', isExplore);
+    if (isExplore) {
+        if (searchToolbar) searchToolbar.classList.add('hidden');
+        if (quickbar) quickbar.classList.remove('hidden');
         if (exploreFilters) exploreFilters.classList.remove('hidden');
     } else {
+        closeExploreFiltersDrawer();
         if (exploreFilters) exploreFilters.classList.add('hidden');
-        if (searchStrip) searchStrip.classList.remove('hidden');
+        if (quickbar) quickbar.classList.add('hidden');
+        if (searchToolbar) searchToolbar.classList.remove('hidden');
     }
+    syncExploreFilterUi();
+}
+
+function isCompactExploreFilters() {
+    return window.matchMedia
+        ? window.matchMedia('(max-width: ' + EXPLORE_COMPACT_BREAKPOINT + 'px)').matches
+        : window.innerWidth <= EXPLORE_COMPACT_BREAKPOINT;
+}
+
+function getExploreSelectedCount() {
+    let count = 0;
+    if (exploreFilterState.mediaType === 'tv') count += 1;
+    if (exploreFilterState.language) count += 1;
+    if (exploreFilterState.decade) count += 1;
+    if (exploreFilterState.rating) count += 1;
+    if (exploreFilterState.voteCount) count += 1;
+    if (exploreFilterState.runtimeGte) count += 1;
+    if (exploreFilterState.runtimeLte) count += 1;
+    count += exploreFilterState.genres.length;
+    return count;
+}
+
+function getExploreSortOptions(mediaType) {
+    const isTv = mediaType === 'tv';
+    return [
+        { value: 'popularity.desc', label: '最热门' },
+        { value: 'vote_average.desc', label: '最高评分' },
+        { value: isTv ? 'first_air_date.desc' : 'primary_release_date.desc', label: '最新上映' },
+        { value: isTv ? 'first_air_date.asc' : 'primary_release_date.asc', label: '最早上映' },
+        { value: 'popularity.asc', label: '最冷门' },
+    ];
+}
+
+function getExploreSortLabel() {
+    const option = getExploreSortOptions(exploreFilterState.mediaType).find((o) => o.value === exploreFilterState.sortBy);
+    return option ? option.label : '最热门';
+}
+
+function getExploreLanguageLabel() {
+    const labels = {
+        zh: '中文',
+        en: '英语',
+        ja: '日语',
+        ko: '韩语',
+        th: '泰语',
+        fr: '法语',
+        de: '德语',
+        es: '西班牙语',
+    };
+    return exploreFilterState.language ? (labels[exploreFilterState.language] || exploreFilterState.language) : '全部语言';
+}
+
+function getExploreSummaryText() {
+    const parts = [
+        exploreFilterState.mediaType === 'tv' ? '剧集' : '电影',
+        getExploreSortLabel(),
+        getExploreLanguageLabel(),
+    ];
+    if (exploreFilterState.decade) parts.push(exploreFilterState.decade + 's');
+    if (exploreFilterState.rating) parts.push('评分≥' + exploreFilterState.rating);
+    if (exploreFilterState.voteCount) parts.push('投票≥' + exploreFilterState.voteCount);
+    if (exploreFilterState.runtimeGte || exploreFilterState.runtimeLte) {
+        parts.push('片长 ' + (exploreFilterState.runtimeGte || '不限') + '-' + (exploreFilterState.runtimeLte || '不限'));
+    }
+    if (exploreFilterState.genres.length) parts.push(exploreFilterState.genres.length + ' 个分类');
+    return parts.join(' · ');
+}
+
+function updateSortOptions(mediaType) {
+    const options = getExploreSortOptions(mediaType || exploreFilterState.mediaType);
+    if (exploreFilterState.sortBy === 'primary_release_date.desc' && (mediaType || exploreFilterState.mediaType) === 'tv') {
+        exploreFilterState.sortBy = 'first_air_date.desc';
+    } else if (exploreFilterState.sortBy === 'primary_release_date.asc' && (mediaType || exploreFilterState.mediaType) === 'tv') {
+        exploreFilterState.sortBy = 'first_air_date.asc';
+    } else if (exploreFilterState.sortBy === 'first_air_date.desc' && (mediaType || exploreFilterState.mediaType) === 'movie') {
+        exploreFilterState.sortBy = 'primary_release_date.desc';
+    } else if (exploreFilterState.sortBy === 'first_air_date.asc' && (mediaType || exploreFilterState.mediaType) === 'movie') {
+        exploreFilterState.sortBy = 'primary_release_date.asc';
+    }
+    if (!options.some((o) => o.value === exploreFilterState.sortBy)) {
+        exploreFilterState.sortBy = EXPLORE_DEFAULT_FILTERS.sortBy;
+    }
+    const html = options.map(function(o) {
+        return '<option value="' + o.value + '">' + o.label + '</option>';
+    }).join('');
+    ['rec-explore-sort', 'rec-explore-sort-mobile'].forEach(function(id) {
+        const select = document.getElementById(id);
+        if (!select) return;
+        select.innerHTML = html;
+        select.value = exploreFilterState.sortBy;
+    });
+}
+
+function syncExploreFilterUi() {
+    const compact = isCompactExploreFilters();
+    const drawerVisible = recommendationActiveTab === 'explore' && compact && exploreDrawerOpen;
+    const filters = document.getElementById('rec-explore-filters');
+    const backdrop = document.getElementById('rec-explore-backdrop');
+    const count = getExploreSelectedCount();
+    const mobileCount = document.getElementById('rec-explore-mobile-count');
+    const drawerToggle = document.getElementById('rec-explore-drawer-toggle');
+    const summaryText = document.getElementById('rec-explore-summary-text');
+
+    updateSortOptions(exploreFilterState.mediaType);
+
+    const valueMap = {
+        'rec-explore-media-type': exploreFilterState.mediaType,
+        'rec-explore-language': exploreFilterState.language,
+        'rec-explore-rating': exploreFilterState.rating,
+        'rec-explore-vote-count': exploreFilterState.voteCount,
+        'rec-explore-runtime-gte': exploreFilterState.runtimeGte,
+        'rec-explore-runtime-lte': exploreFilterState.runtimeLte,
+    };
+    Object.keys(valueMap).forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el && el.value !== valueMap[id]) el.value = valueMap[id];
+    });
+
+    document.getElementById('rec-explore-media-movie')?.classList.toggle('is-active', exploreFilterState.mediaType === 'movie');
+    document.getElementById('rec-explore-media-tv')?.classList.toggle('is-active', exploreFilterState.mediaType === 'tv');
+    document.getElementById('rec-explore-media-movie')?.setAttribute('aria-pressed', exploreFilterState.mediaType === 'movie' ? 'true' : 'false');
+    document.getElementById('rec-explore-media-tv')?.setAttribute('aria-pressed', exploreFilterState.mediaType === 'tv' ? 'true' : 'false');
+
+    document.querySelectorAll('#rec-explore-decade-chips .rec-genre-chip').forEach(function(chip) {
+        chip.classList.toggle('is-selected', chip.dataset.decade === exploreFilterState.decade);
+    });
+    document.querySelectorAll('#rec-explore-genres .rec-genre-chip').forEach(function(chip) {
+        chip.classList.toggle('is-selected', exploreFilterState.genres.includes(String(chip.dataset.genreId)));
+    });
+
+    if (mobileCount) {
+        mobileCount.textContent = ' · ' + count;
+        mobileCount.classList.toggle('hidden', count <= 0);
+    }
+    if (summaryText) summaryText.textContent = getExploreSummaryText();
+    if (recommendationActiveTab === 'explore') {
+        const subtitle = '当前条件：' + getExploreSummaryText();
+        const subtitleEl = document.getElementById('recommendation-content-subtitle');
+        if (subtitleEl) subtitleEl.innerText = subtitle;
+    }
+
+    if (filters) filters.classList.toggle('is-mobile-open', drawerVisible);
+    if (drawerToggle) drawerToggle.setAttribute('aria-expanded', drawerVisible ? 'true' : 'false');
+    if (backdrop) {
+        backdrop.classList.toggle('hidden', !drawerVisible);
+    }
+    document.body?.classList.toggle('rec-explore-drawer-open', drawerVisible);
+}
+
+function setExploreDrawerOpen(open) {
+    exploreDrawerOpen = !!open && recommendationActiveTab === 'explore';
+    syncExploreFilterUi();
+}
+
+function openExploreFiltersDrawer() {
+    setExploreDrawerOpen(true);
+}
+
+function closeExploreFiltersDrawer() {
+    setExploreDrawerOpen(false);
+}
+
+function toggleExploreMoreFilters(forceExpanded) {
+    setExploreDrawerOpen(typeof forceExpanded === 'boolean' ? forceExpanded : !exploreDrawerOpen);
+}
+
+function bindExploreFilterInputs() {
+    const bindings = [
+        { id: 'rec-explore-language', key: 'language', event: 'change' },
+        { id: 'rec-explore-rating', key: 'rating', event: 'input' },
+        { id: 'rec-explore-vote-count', key: 'voteCount', event: 'input' },
+        { id: 'rec-explore-runtime-gte', key: 'runtimeGte', event: 'input' },
+        { id: 'rec-explore-runtime-lte', key: 'runtimeLte', event: 'input' },
+    ];
+    bindings.forEach(function(binding) {
+        const el = document.getElementById(binding.id);
+        if (!el || el.dataset.recExploreBound === '1') return;
+        el.addEventListener(binding.event, function() {
+            exploreFilterState[binding.key] = (el.value || '').trim();
+            syncExploreFilterUi();
+        });
+        el.dataset.recExploreBound = '1';
+    });
+}
+
+async function applyExploreFilters() {
+    if (isCompactExploreFilters()) {
+        closeExploreFiltersDrawer();
+    }
+    await searchRecommendationDiscover();
+}
+
+async function applyExploreMoreFilters() {
+    await applyExploreFilters();
+}
+
+function syncExploreMoreToggle() {
+    syncExploreFilterUi();
 }
 
 function buildPaginationHtml(page, totalPages) {
@@ -189,34 +433,33 @@ function buildPosterHtml(posterUrl, title) {
     '</div>';
 }
 
-function buildCardMetaHtml(item) {
+function buildCardMetaHtml(item, options) {
+    const opts = options || {};
     const parts = [];
     const mediaLabel = item.media_type === 'tv' ? '剧集' : '电影';
     parts.push('<span class="rec-card-meta-tag">' + escapeRecHtml(mediaLabel) + '</span>');
     if (item.year) {
-        parts.push('<span class="rec-card-meta-text">' + escapeRecHtml(String(item.year)) + '</span>');
+        parts.push('<span class="rec-card-meta-text rec-card-meta-year">' + escapeRecHtml(String(item.year)) + '</span>');
     }
-    if (item.original_title && item.original_title !== item.title) {
-        parts.push('<span class="rec-card-meta-text truncate">' + escapeRecHtml(item.original_title) + '</span>');
+    if (opts.includeOriginalTitle && item.original_title && item.original_title !== item.title) {
+        parts.push('<span class="rec-card-original-title">' + escapeRecHtml(item.original_title) + '</span>');
     }
-    return parts.join('');
+    return '<div class="rec-card-meta">' + parts.join('') + '</div>';
 }
 
 function buildRecCardHtml(item, index) {
     const poster = buildPosterHtml(item.poster_url, item.title);
     const voteBadge = buildVoteBadgeHtml(item.vote_average);
-    const meta = buildCardMetaHtml(item);
+    const meta = buildCardMetaHtml(item, { includeOriginalTitle: true });
     const inWatchlist = isInWatchlist(item.id, item.media_type);
     const watchlistBtnClass = inWatchlist ? 'rec-btn-watchlist-active' : 'rec-btn-watchlist';
     const watchlistLabel = inWatchlist ? '已想看' : '想看';
-    const overview = item.overview || '';
 
     return '<div class="rec-card">' +
         '<div class="rec-card-poster-wrap" onclick="openRecDetail(' + index + ')">' + poster + voteBadge + '</div>' +
         '<div class="rec-card-info">' +
             '<div class="rec-card-title" onclick="openRecDetail(' + index + ')">' + escapeRecHtml(item.title || '--') + '</div>' +
-            '<div class="rec-card-meta">' + meta + '</div>' +
-            (overview ? '<div class="rec-card-overview">' + escapeRecHtml(overview) + '</div>' : '') +
+            meta +
         '</div>' +
         '<div class="rec-card-actions">' +
             '<button type="button" onclick="toggleRecommendationWatchlist(' + index + ')" class="rec-card-btn ' + watchlistBtnClass + '">' + watchlistLabel + '</button>' +
@@ -234,9 +477,7 @@ function buildWatchlistCardHtml(item) {
     const status = item.status || 'want';
     const statusLabel = statusMap[status] || status;
     const statusColor = statusColorMap[status] || 'bg-slate-700 text-slate-300';
-    const mediaLabel = item.media_type === 'tv' ? '剧集' : '电影';
-    const meta = '<span class="rec-card-meta-tag">' + escapeRecHtml(mediaLabel) + '</span>' +
-        (item.year ? '<span class="rec-card-meta-text">' + escapeRecHtml(String(item.year)) + '</span>' : '');
+    const meta = buildCardMetaHtml(item);
 
     return '<div class="rec-card">' +
         '<div class="rec-card-poster-wrap" onclick="openWatchlistDetail(' + item.id + ')">' + poster + voteBadge +
@@ -244,7 +485,7 @@ function buildWatchlistCardHtml(item) {
         '</div>' +
         '<div class="rec-card-info">' +
             '<div class="rec-card-title" onclick="openWatchlistDetail(' + item.id + ')">' + escapeRecHtml(item.title || '--') + '</div>' +
-            '<div class="rec-card-meta">' + meta + '</div>' +
+            meta +
         '</div>' +
         '<div class="rec-card-actions">' +
             '<button type="button" onclick="searchResourceForWatchlist(' + item.id + ')" class="rec-card-btn rec-btn-search-resource">搜索</button>' +
@@ -357,8 +598,10 @@ function renderWatchlistGrid() {
 async function loadRecommendationTrending(timeWindow, page) {
     const mediaType = document.getElementById('recommendation-media-type')?.value || 'all';
     setActiveRecTab('trending-' + timeWindow);
-    const titleEl = document.getElementById('recommendation-content-title');
-    if (titleEl) titleEl.innerText = timeWindow === 'day' ? '今日热榜' : '本周热榜';
+    setRecommendationContentHeader(
+        timeWindow === 'day' ? '今日热榜' : '本周热榜',
+        timeWindow === 'day' ? 'TMDB 今日热度变化最快的影视条目。' : '过去一周热度最高的影视资源。'
+    );
     recommendationItems = [];
     setRecommendationBusy(true);
     renderLoadingGrid();
@@ -384,8 +627,10 @@ async function loadRecommendationTrending(timeWindow, page) {
 
 async function loadRecommendationPopular(mediaType, page) {
     setActiveRecTab('popular-' + mediaType);
-    const titleEl = document.getElementById('recommendation-content-title');
-    if (titleEl) titleEl.innerText = mediaType === 'movie' ? '热门电影' : '热门剧集';
+    setRecommendationContentHeader(
+        mediaType === 'movie' ? '热门电影' : '热门剧集',
+        mediaType === 'movie' ? '当前最受关注的电影片单。' : '当前最受关注的剧集片单。'
+    );
     recommendationItems = [];
     setRecommendationBusy(true);
     renderLoadingGrid();
@@ -417,8 +662,7 @@ async function searchRecommendationTmdb(queryOverride, mediaTypeOverride, page) 
     }
     const mediaType = mediaTypeOverride || document.getElementById('recommendation-media-type')?.value || 'all';
     setActiveRecTab('search');
-    const titleEl = document.getElementById('recommendation-content-title');
-    if (titleEl) titleEl.innerText = '搜索：' + query;
+    setRecommendationContentHeader('搜索：' + query, '在 TMDB 中搜索影视名称，并可继续搜索资源或创建订阅。');
     recommendationItems = [];
     setRecommendationBusy(true);
     renderLoadingGrid();
@@ -444,8 +688,7 @@ async function searchRecommendationTmdb(queryOverride, mediaTypeOverride, page) 
 
 function showRecommendationWatchlist() {
     setActiveRecTab('watchlist');
-    const titleEl = document.getElementById('recommendation-content-title');
-    if (titleEl) titleEl.innerText = '想看清单';
+    setRecommendationContentHeader('想看清单', '你保存的待看条目，后续可继续搜索资源或创建订阅。');
     resetPagination();
     renderWatchlistGrid();
 }
@@ -740,15 +983,17 @@ function renderExploreGenreChips(mediaType) {
     if (!container) return;
     const genres = exploreGenres[mediaType] || [];
     container.innerHTML = genres.map(function(g) {
-        return '<button type="button" class="rec-genre-chip" data-genre-id="' + g.id + '" onclick="this.classList.toggle(\'is-selected\')">' +
+        const genreId = String(g.id);
+        const selectedClass = exploreFilterState.genres.includes(genreId) ? ' is-selected' : '';
+        return '<button type="button" class="rec-genre-chip' + selectedClass + '" data-genre-id="' + genreId + '" onclick="toggleExploreGenre(\'' + genreId + '\')">' +
             escapeRecHtml(g.name) +
         '</button>';
     }).join('');
+    syncExploreFilterUi();
 }
 
 function getSelectedExploreGenres() {
-    const chips = document.querySelectorAll('#rec-explore-genres .rec-genre-chip.is-selected');
-    return Array.from(chips).map(function(c) { return c.dataset.genreId; }).filter(Boolean).join(',');
+    return exploreFilterState.genres.join(',');
 }
 
 function renderDecadeChips() {
@@ -757,105 +1002,97 @@ function renderDecadeChips() {
     var currentDecade = Math.floor(new Date().getFullYear() / 10) * 10;
     var html = '';
     for (var d = currentDecade; d >= 1950; d -= 10) {
-        html += '<button type="button" class="rec-genre-chip" data-decade="' + d + '" onclick="selectDecade(this)">' + d + 's</button>';
+        html += '<button type="button" class="rec-genre-chip" data-decade="' + d + '" onclick="selectDecade(\'' + d + '\')">' + d + 's</button>';
     }
     container.innerHTML = html;
+    syncExploreFilterUi();
 }
 
-function selectDecade(btn) {
-    const container = document.getElementById('rec-explore-decade-chips');
-    if (!container) return;
-    const wasSelected = btn.classList.contains('is-selected');
-    container.querySelectorAll('.rec-genre-chip').forEach(function(c) { c.classList.remove('is-selected'); });
-    if (!wasSelected) btn.classList.add('is-selected');
+function selectDecade(input) {
+    const decade = typeof input === 'string' ? input : (input?.dataset?.decade || '');
+    exploreFilterState.decade = exploreFilterState.decade === decade ? '' : decade;
+    syncExploreFilterUi();
 }
 
 function getSelectedDecade() {
-    const el = document.querySelector('#rec-explore-decade-chips .rec-genre-chip.is-selected');
-    return el ? el.dataset.decade : '';
+    return exploreFilterState.decade;
 }
 
 async function onExploreMediaTypeChange() {
     const mediaType = document.getElementById('rec-explore-media-type')?.value || 'movie';
-    updateSortOptions(mediaType);
-    await loadExploreGenres(mediaType);
-    renderExploreGenreChips(mediaType);
+    await setExploreMediaType(mediaType, false);
 }
 
-function updateSortOptions(mediaType) {
-    const sortSelect = document.getElementById('rec-explore-sort');
-    if (!sortSelect) return;
-    const currentVal = sortSelect.value;
-    const isTv = mediaType === 'tv';
-    sortSelect.innerHTML = [
-        { value: 'popularity.desc', label: '最热门' },
-        { value: 'vote_average.desc', label: '最高评分' },
-        { value: isTv ? 'first_air_date.desc' : 'primary_release_date.desc', label: '最新上映' },
-        { value: isTv ? 'first_air_date.asc' : 'primary_release_date.asc', label: '最早上映' },
-        { value: 'popularity.asc', label: '最冷门' },
-    ].map(function(o) {
-        return '<option value="' + o.value + '">' + o.label + '</option>';
-    }).join('');
-    // 尝试保留之前的选择
-    if (Array.from(sortSelect.options).some(function(o) { return o.value === currentVal; })) {
-        sortSelect.value = currentVal;
+async function setExploreMediaType(mediaType, applyNow) {
+    const normalized = mediaType === 'tv' ? 'tv' : 'movie';
+    const changed = exploreFilterState.mediaType !== normalized;
+    exploreFilterState.mediaType = normalized;
+    if (changed) {
+        exploreFilterState.genres = [];
+    }
+    updateSortOptions(normalized);
+    await loadExploreGenres(normalized);
+    renderExploreGenreChips(normalized);
+    syncExploreFilterUi();
+    if (applyNow && recommendationActiveTab === 'explore' && isCompactExploreFilters()) {
+        await searchRecommendationDiscover();
     }
 }
 
-function resetExploreFilters() {
-    var mediaTypeEl = document.getElementById('rec-explore-media-type');
-    var sortEl = document.getElementById('rec-explore-sort');
-    var langEl = document.getElementById('rec-explore-language');
-    var ratingEl = document.getElementById('rec-explore-rating');
-    var voteCountEl = document.getElementById('rec-explore-vote-count');
-    var runtimeGteEl = document.getElementById('rec-explore-runtime-gte');
-    var runtimeLteEl = document.getElementById('rec-explore-runtime-lte');
+async function setExploreSort(sortBy, applyNow) {
+    exploreFilterState.sortBy = sortBy || EXPLORE_DEFAULT_FILTERS.sortBy;
+    syncExploreFilterUi();
+    if (applyNow && recommendationActiveTab === 'explore' && isCompactExploreFilters()) {
+        await searchRecommendationDiscover();
+    }
+}
 
-    if (mediaTypeEl) mediaTypeEl.value = 'movie';
-    if (langEl) langEl.value = '';
-    document.querySelectorAll('#rec-explore-decade-chips .rec-genre-chip.is-selected').forEach(function(c) {
-        c.classList.remove('is-selected');
-    });
-    if (ratingEl) ratingEl.value = '';
-    if (voteCountEl) voteCountEl.value = '';
-    if (runtimeGteEl) runtimeGteEl.value = '';
-    if (runtimeLteEl) runtimeLteEl.value = '';
+function toggleExploreGenre(genreId) {
+    const id = String(genreId);
+    if (exploreFilterState.genres.includes(id)) {
+        exploreFilterState.genres = exploreFilterState.genres.filter((item) => item !== id);
+    } else {
+        exploreFilterState.genres = exploreFilterState.genres.concat(id);
+    }
+    syncExploreFilterUi();
+}
 
-    updateSortOptions('movie');
-    // 清除类型选择
-    document.querySelectorAll('#rec-explore-genres .rec-genre-chip.is-selected').forEach(function(c) {
-        c.classList.remove('is-selected');
-    });
-
-    onExploreMediaTypeChange();
+async function resetExploreFilters() {
+    exploreFilterState = getDefaultExploreFilters();
+    updateSortOptions(exploreFilterState.mediaType);
+    await loadExploreGenres(exploreFilterState.mediaType);
+    renderExploreGenreChips(exploreFilterState.mediaType);
+    syncExploreFilterUi();
 }
 
 async function showRecommendationExplore() {
     setActiveRecTab('explore');
-    const titleEl = document.getElementById('recommendation-content-title');
-    if (titleEl) titleEl.innerText = '探索发现';
+    setRecommendationContentHeader('探索发现', '当前条件：' + getExploreSummaryText());
     resetPagination();
     recommendationItems = [];
-    const mediaType = document.getElementById('rec-explore-media-type')?.value || 'movie';
-    updateSortOptions(mediaType);
-    await loadExploreGenres(mediaType);
-    renderExploreGenreChips(mediaType);
+    bindExploreFilterInputs();
+    closeExploreFiltersDrawer();
+    updateSortOptions(exploreFilterState.mediaType);
+    await loadExploreGenres(exploreFilterState.mediaType);
+    renderExploreGenreChips(exploreFilterState.mediaType);
+    syncExploreFilterUi();
     await searchRecommendationDiscover();
 }
 
 async function searchRecommendationDiscover(page) {
-    const mediaType = document.getElementById('rec-explore-media-type')?.value || 'movie';
-    const sortBy = document.getElementById('rec-explore-sort')?.value || 'popularity.desc';
-    const language = document.getElementById('rec-explore-language')?.value || '';
-    const decade = getSelectedDecade();
+    const mediaType = exploreFilterState.mediaType;
+    const sortBy = exploreFilterState.sortBy;
+    const language = exploreFilterState.language;
+    const decade = exploreFilterState.decade;
     const yearFrom = decade || '';
     const yearTo = decade ? String(Number(decade) + 9) : '';
-    const rating = document.getElementById('rec-explore-rating')?.value || '';
-    const voteCount = document.getElementById('rec-explore-vote-count')?.value || '';
-    const runtimeGte = document.getElementById('rec-explore-runtime-gte')?.value || '';
-    const runtimeLte = document.getElementById('rec-explore-runtime-lte')?.value || '';
+    const rating = exploreFilterState.rating;
+    const voteCount = exploreFilterState.voteCount;
+    const runtimeGte = exploreFilterState.runtimeGte;
+    const runtimeLte = exploreFilterState.runtimeLte;
     const genres = getSelectedExploreGenres();
     recommendationItems = [];
+    setRecommendationContentHeader('探索发现', '当前条件：' + getExploreSummaryText());
     setRecommendationBusy(true);
     renderLoadingGrid();
     try {
@@ -886,11 +1123,16 @@ async function searchRecommendationDiscover(page) {
         updatePagination();
     } finally {
         setRecommendationBusy(false);
+        syncExploreFilterUi();
     }
 }
 
 async function initRecommendationPage() {
     renderDecadeChips();
+    bindExploreFilterInputs();
+    updateSortOptions(exploreFilterState.mediaType);
+    syncExploreFilterUi();
+    window.addEventListener('resize', syncExploreFilterUi);
     await loadRecommendationWatchlist();
     if (!recommendationItems.length) {
         await loadRecommendationTrending('week');
@@ -920,8 +1162,18 @@ Object.assign(window, {
     goToRecommendationPage,
     showRecommendationExplore,
     searchRecommendationDiscover,
+    applyExploreFilters,
+    applyExploreMoreFilters,
     onExploreMediaTypeChange,
+    setExploreMediaType,
+    setExploreSort,
+    toggleExploreGenre,
+    openExploreFiltersDrawer,
+    closeExploreFiltersDrawer,
     resetExploreFilters,
+    toggleExploreMoreFilters,
+    syncExploreMoreToggle,
+    syncExploreFilterUi,
     updateSortOptions,
     selectDecade,
     getSelectedDecade,
