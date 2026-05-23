@@ -102,6 +102,8 @@ def ensure_db() -> None:
                     task_name TEXT NOT NULL,
                     dir_rel_path TEXT NOT NULL,
                     remote_modified TEXT,
+                    needs_rescan INTEGER NOT NULL DEFAULT 0,
+                    missing_confirmations INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (task_name, dir_rel_path)
                 )
                 """
@@ -348,11 +350,23 @@ def ensure_db() -> None:
             local_file_columns = {str(row[1]) for row in cursor.fetchall()}
             if "scan_token" not in local_file_columns:
                 cursor.execute("ALTER TABLE local_files ADD COLUMN scan_token TEXT NOT NULL DEFAULT ''")
+            cursor.execute("PRAGMA table_info(monitor_dirs)")
+            monitor_dir_columns = {str(row[1]) for row in cursor.fetchall()}
+            if "needs_rescan" not in monitor_dir_columns:
+                cursor.execute("ALTER TABLE monitor_dirs ADD COLUMN needs_rescan INTEGER NOT NULL DEFAULT 0")
+            if "missing_confirmations" not in monitor_dir_columns:
+                cursor.execute("ALTER TABLE monitor_dirs ADD COLUMN missing_confirmations INTEGER NOT NULL DEFAULT 0")
             cursor.execute("PRAGMA table_info(resource_jobs)")
             job_columns = {str(row[1]) for row in cursor.fetchall()}
             if "extra_json" not in job_columns:
                 cursor.execute("ALTER TABLE resource_jobs ADD COLUMN extra_json TEXT NOT NULL DEFAULT '{}'")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_local_files_scan_token ON local_files(scan_token)")
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_monitor_dirs_task_rescan
+                ON monitor_dirs(task_name, needs_rescan, dir_rel_path)
+                """
+            )
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_items_link ON resource_items(link_url) WHERE link_url <> ''"
             )

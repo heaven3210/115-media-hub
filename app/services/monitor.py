@@ -4,6 +4,10 @@ from ..memory import release_process_memory
 from .notify import push_monitor_success_notification
 from .strm_files import delete_managed_strm_file, managed_strm_file_path, remove_empty_parent_dirs
 
+
+MONITOR_DIR_MISSING_RELEASE_CONFIRMATIONS = 2
+
+
 def write_strm_file(target_file: str, url: str, force: bool = False) -> bool:
     next_url = str(url or "").strip()
     old_content = None
@@ -35,6 +39,198 @@ async def mark_cached_dir_as_seen(
         (task_name, local_prefix, like_prefix),
     )
     await asyncio.sleep(0)
+
+
+def _dir_rel_from_local(task_root: str, local_dir_rel: str) -> str:
+    if local_dir_rel == task_root:
+        return ""
+    return normalize_relative_path(os.path.relpath(local_dir_rel, task_root))
+
+
+def _remote_dir_from_rel(task_scan_path: str, dir_rel_path: str) -> str:
+    if not dir_rel_path:
+        return normalize_remote_path(task_scan_path)
+    return join_remote_path(task_scan_path, dir_rel_path)
+
+
+def _load_monitor_dir_state(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> Dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT remote_modified, needs_rescan, missing_confirmations
+        FROM monitor_dirs
+        WHERE task_name = ? AND dir_rel_path = ?
+        """,
+        (task_name, dir_rel_path),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return {
+            "exists": False,
+            "remote_modified": "",
+            "needs_rescan": False,
+            "missing_confirmations": 0,
+        }
+    return {
+        "exists": True,
+        "remote_modified": str(row[0] or ""),
+        "needs_rescan": bool(int(row[1] or 0)),
+        "missing_confirmations": max(0, int(row[2] or 0)),
+    }
+
+
+def _mark_monitor_dir_success(
+    cursor: sqlite3.Cursor,
+    task_name: str,
+    dir_rel_path: str,
+    remote_modified: str,
+) -> None:
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO monitor_dirs(
+            task_name,
+            dir_rel_path,
+            remote_modified,
+            needs_rescan,
+            missing_confirmations
+        ) VALUES (?, ?, ?, 0, 0)
+        """,
+        (task_name, dir_rel_path, str(remote_modified or "")),
+    )
+
+
+def _mark_monitor_dir_dirty(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> None:
+    state = _load_monitor_dir_state(cursor, task_name, dir_rel_path)
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO monitor_dirs(
+            task_name,
+            dir_rel_path,
+            remote_modified,
+            needs_rescan,
+            missing_confirmations
+        ) VALUES (?, ?, ?, 1, ?)
+        """,
+        (
+            task_name,
+            dir_rel_path,
+            state["remote_modified"],
+            state["missing_confirmations"],
+        ),
+    )
+
+
+def _reset_monitor_dir_missing_confirmations(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> None:
+    cursor.execute(
+        """
+        UPDATE monitor_dirs
+        SET missing_confirmations = 0
+        WHERE task_name = ? AND dir_rel_path = ? AND missing_confirmations <> 0
+        """,
+        (task_name, dir_rel_path),
+    )
+
+
+def _monitor_dir_has_dirty_subtree(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> bool:
+    if dir_rel_path:
+        scope_like = f"{dir_rel_path}/%"
+        cursor.execute(
+            """
+            SELECT 1
+            FROM monitor_dirs
+            WHERE task_name = ?
+            AND needs_rescan = 1
+            AND (dir_rel_path = ? OR dir_rel_path LIKE ?)
+            LIMIT 1
+            """,
+            (task_name, dir_rel_path, scope_like),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM monitor_dirs
+            WHERE task_name = ?
+            AND needs_rescan = 1
+            LIMIT 1
+            """,
+            (task_name,),
+        )
+    return cursor.fetchone() is not None
+
+
+def _list_dirty_direct_children(cursor: sqlite3.Cursor, task_name: str, parent_dir_rel: str) -> List[str]:
+    if parent_dir_rel:
+        prefix = f"{parent_dir_rel}/"
+        cursor.execute(
+            """
+            SELECT dir_rel_path
+            FROM monitor_dirs
+            WHERE task_name = ?
+            AND needs_rescan = 1
+            AND dir_rel_path LIKE ?
+            """,
+            (task_name, f"{prefix}%"),
+        )
+    else:
+        prefix = ""
+        cursor.execute(
+            """
+            SELECT dir_rel_path
+            FROM monitor_dirs
+            WHERE task_name = ?
+            AND needs_rescan = 1
+            AND dir_rel_path <> ''
+            """,
+            (task_name,),
+        )
+
+    direct_children = set()
+    prefix_len = len(prefix)
+    for row in cursor.fetchall():
+        rel_path = normalize_relative_path(str(row[0] or ""))
+        if not rel_path:
+            continue
+        suffix = rel_path[prefix_len:] if prefix else rel_path
+        if not suffix:
+            continue
+        first_segment = suffix.split("/", 1)[0]
+        direct_children.add(join_relative_path(parent_dir_rel, first_segment) if parent_dir_rel else first_segment)
+    return sorted(direct_children)
+
+
+def _delete_monitor_dir_subtree(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> None:
+    scope_like = f"{dir_rel_path}/%"
+    cursor.execute(
+        """
+        DELETE FROM monitor_dirs
+        WHERE task_name = ?
+        AND (dir_rel_path = ? OR dir_rel_path LIKE ?)
+        """,
+        (task_name, dir_rel_path, scope_like),
+    )
+
+
+def _bump_missing_monitor_dir(cursor: sqlite3.Cursor, task_name: str, dir_rel_path: str) -> int:
+    state = _load_monitor_dir_state(cursor, task_name, dir_rel_path)
+    next_missing = max(0, int(state["missing_confirmations"] or 0)) + 1
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO monitor_dirs(
+            task_name,
+            dir_rel_path,
+            remote_modified,
+            needs_rescan,
+            missing_confirmations
+        ) VALUES (?, ?, ?, 1, ?)
+        """,
+        (
+            task_name,
+            dir_rel_path,
+            state["remote_modified"],
+            next_missing,
+        ),
+    )
+    return next_missing
 
 
 async def run_monitor_task(
@@ -144,6 +340,8 @@ async def run_monitor_task(
         scanned_dirs = set()
         fallback_guard_expected_path = ""
         fallback_guard_parent_path = ""
+        active_dir_rel = ""
+        active_dir_active = False
 
         await write_monitor_section("扫描生成")
 
@@ -153,6 +351,9 @@ async def run_monitor_task(
             if remote_dir in scanned_dirs:
                 continue
 
+            dir_rel = _dir_rel_from_local(task_root, local_dir_rel)
+            active_dir_rel = dir_rel
+            active_dir_active = True
             update_monitor_summary("扫描目录", remote_dir)
             await write_monitor_log(f"读取目录: {remote_dir}", "info")
 
@@ -163,6 +364,7 @@ async def run_monitor_task(
                 stats["success_dirs"] += 1
             except Exception as exc:
                 stats["failed_dirs"] += 1
+                _mark_monitor_dir_dirty(cursor, task_name, dir_rel)
                 await write_monitor_log(f"读取目录失败: {remote_dir} ({exc})", "error")
                 if (
                     refresh_source_label
@@ -185,30 +387,31 @@ async def run_monitor_task(
                             f"{refresh_source_label} 回退后将仅扫描目标子树: {fallback_guard_expected_path}",
                             "warn",
                         )
+                active_dir_rel = ""
+                active_dir_active = False
                 continue
             scanned_dirs.add(remote_dir)
 
-            dir_rel = normalize_relative_path(os.path.relpath(local_dir_rel, task_root)) if local_dir_rel != task_root else ""
-            if task["skip_by_dir_mtime"] and modified:
-                cursor.execute(
-                    "SELECT remote_modified FROM monitor_dirs WHERE task_name = ? AND dir_rel_path = ?",
-                    (task_name, dir_rel),
-                )
-                row = cursor.fetchone()
-                if row and row[0] and row[0] >= modified:
-                    stats["skipped_dirs"] += 1
-                    await mark_cached_dir_as_seen(conn, task_name, local_dir_rel)
-                    await write_monitor_log(f"跳过目录: {remote_dir}", "warn")
-                    if task["list_delay_ms"] > 0:
-                        await sleep_interruptible(task["list_delay_ms"] / 1000)
-                    continue
-
-            cursor.execute(
-                "INSERT OR REPLACE INTO monitor_dirs(task_name, dir_rel_path, remote_modified) VALUES (?, ?, ?)",
-                (task_name, dir_rel, modified),
-            )
+            dir_state = _load_monitor_dir_state(cursor, task_name, dir_rel)
+            if (
+                task["skip_by_dir_mtime"]
+                and modified
+                and dir_state["remote_modified"]
+                and dir_state["remote_modified"] >= modified
+                and not _monitor_dir_has_dirty_subtree(cursor, task_name, dir_rel)
+            ):
+                _reset_monitor_dir_missing_confirmations(cursor, task_name, dir_rel)
+                stats["skipped_dirs"] += 1
+                await mark_cached_dir_as_seen(conn, task_name, local_dir_rel)
+                await write_monitor_log(f"跳过目录: {remote_dir}", "warn")
+                active_dir_rel = ""
+                active_dir_active = False
+                if task["list_delay_ms"] > 0:
+                    await sleep_interruptible(task["list_delay_ms"] / 1000)
+                continue
 
             fallback_target_branch_found = False
+            present_child_dir_rels = set()
             for item in items:
                 check_monitor_cancelled()
                 name = item.get("name") or ""
@@ -230,6 +433,26 @@ async def run_monitor_task(
                             continue
                         if remote_dir == fallback_guard_parent_path:
                             fallback_target_branch_found = True
+                    child_dir_rel = _dir_rel_from_local(task_root, item_local_rel)
+                    present_child_dir_rels.add(child_dir_rel)
+                    if remote_dir == fallback_guard_parent_path and fallback_guard_expected_path:
+                        _reset_monitor_dir_missing_confirmations(cursor, task_name, child_dir_rel)
+
+                    child_state = _load_monitor_dir_state(cursor, task_name, child_dir_rel)
+                    child_has_dirty = _monitor_dir_has_dirty_subtree(cursor, task_name, child_dir_rel)
+                    if (
+                        task["skip_by_dir_mtime"]
+                        and modified_at
+                        and child_state["remote_modified"]
+                        and child_state["remote_modified"] >= modified_at
+                        and not child_has_dirty
+                    ):
+                        _reset_monitor_dir_missing_confirmations(cursor, task_name, child_dir_rel)
+                        stats["skipped_dirs"] += 1
+                        await mark_cached_dir_as_seen(conn, task_name, item_local_rel)
+                        await write_monitor_log(f"跳过目录: {item_remote_path}", "warn")
+                        continue
+
                     queue.append((item_remote_path, item_local_rel))
                     continue
 
@@ -264,6 +487,31 @@ async def run_monitor_task(
                     (item_local_rel, remote_rel, modified_at, size),
                 )
 
+            dirty_child_rels = _list_dirty_direct_children(cursor, task_name, dir_rel)
+            for child_dir_rel in dirty_child_rels:
+                child_remote_path = _remote_dir_from_rel(task_scan_path, child_dir_rel)
+                if fallback_guard_expected_path:
+                    in_target_tree = is_subpath(child_remote_path, fallback_guard_expected_path)
+                    is_target_ancestor = is_subpath(fallback_guard_expected_path, child_remote_path)
+                    if not in_target_tree and not is_target_ancestor:
+                        continue
+                if child_dir_rel in present_child_dir_rels:
+                    _reset_monitor_dir_missing_confirmations(cursor, task_name, child_dir_rel)
+                    continue
+
+                missing_count = _bump_missing_monitor_dir(cursor, task_name, child_dir_rel)
+                if missing_count >= MONITOR_DIR_MISSING_RELEASE_CONFIRMATIONS:
+                    _delete_monitor_dir_subtree(cursor, task_name, child_dir_rel)
+                    await write_monitor_log(
+                        f"待补扫目录已连续 {MONITOR_DIR_MISSING_RELEASE_CONFIRMATIONS} 次确认不存在，已释放记录: {_remote_dir_from_rel(task_scan_path, child_dir_rel)}",
+                        "info",
+                    )
+                else:
+                    await write_monitor_log(
+                        f"待补扫目录本轮未出现，保留补扫记录 ({missing_count}/{MONITOR_DIR_MISSING_RELEASE_CONFIRMATIONS}): {_remote_dir_from_rel(task_scan_path, child_dir_rel)}",
+                        "warn",
+                    )
+
             if (
                 fallback_guard_expected_path
                 and remote_dir == fallback_guard_parent_path
@@ -274,6 +522,9 @@ async def run_monitor_task(
                     "warn",
                 )
 
+            _mark_monitor_dir_success(cursor, task_name, dir_rel, modified)
+            active_dir_rel = ""
+            active_dir_active = False
             if task["list_delay_ms"] > 0:
                 await sleep_interruptible(task["list_delay_ms"] / 1000)
 
@@ -381,6 +632,12 @@ async def run_monitor_task(
         await write_monitor_task_footer(task_name, "执行成功")
         update_monitor_summary("任务完成", f"{task_name} 执行结束")
     except asyncio.CancelledError:
+        try:
+            if "conn" in locals() and conn is not None and "active_dir_active" in locals() and active_dir_active:
+                _mark_monitor_dir_dirty(conn.cursor(), task_name, active_dir_rel)
+                conn.commit()
+        except Exception:
+            pass
         await write_monitor_section("执行结果")
         await write_monitor_task_summary(
             stats,
@@ -389,6 +646,12 @@ async def run_monitor_task(
         await write_monitor_task_footer(task_name, "已中断")
         update_monitor_summary("任务中断", task_name)
     except Exception as exc:
+        try:
+            if "conn" in locals() and conn is not None and "active_dir_active" in locals() and active_dir_active:
+                _mark_monitor_dir_dirty(conn.cursor(), task_name, active_dir_rel)
+                conn.commit()
+        except Exception:
+            pass
         await write_monitor_section("执行结果")
         await write_monitor_task_summary(
             stats,

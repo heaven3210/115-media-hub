@@ -48,9 +48,9 @@
                     <label class="flex items-center gap-3 cursor-pointer text-sm">
                         <input type="checkbox" id="monitor_skip_by_dir_mtime" class="ui-checkbox">
                         <span>按文件夹修改时间校验（未变化目录跳过更新）</span>
-                        <button type="button" class="info-dot" onclick="showHelp('开启后会按文件夹修改时间判断是否刷新；修改时间未变化的目录将跳过更新，以减少无效扫描。若你手动删除了本地文件并需要重新生成，请先取消勾选此项再执行任务。')">i</button>
+                        <button type="button" class="info-dot" onclick="showHelp('开启后会按文件夹修改时间判断是否刷新；未变化且没有待补扫记录的目录会跳过更新，以减少无效扫描。若某个目录上次读取失败，后续成功出现时会自动补扫；若连续 2 次确认该目录已不存在，则会自动释放补扫记录。')">i</button>
                     </label>
-                    <div class="text-xs text-slate-500 pl-8 -mt-2">备注：若本地文件是手动删除后要重新生成，请先取消勾选此项，再运行任务。</div>
+                    <div class="text-xs text-slate-500 pl-8 -mt-2">备注：未变化且无待补扫目录时会直接跳过；失败目录后续会自动补扫，连续 2 次确认不存在后自动释放。</div>
                     <label class="block">
                         <span class="text-xs text-slate-500">STRM 写入模式</span>
                         <select id="monitor_strm_write_mode" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1 outline-none">
