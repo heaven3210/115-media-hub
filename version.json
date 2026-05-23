@@ -1,8 +1,8 @@
 {
-  "version": "0.4.6",
+  "version": "0.4.7",
   "buildDate": "2026-05-23T00:00:00+08:00",
   "notes": [
-    "重构文件夹监控目录时间校验，支持失败子目录精准补扫与自动释放待补扫记录"
+    "修复 Webhook 端点被登录中间件拦截导致油猴脚本无法推送磁力链接的问题"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

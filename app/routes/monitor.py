@@ -14,6 +14,7 @@ from ..services.monitor import queue_monitor_job
 from ..services.resource import run_resource_job
 
 router = APIRouter()
+webhook_router = APIRouter()
 
 USERSCRIPT_WEBHOOK_SOURCE = "userscript_webhook"
 WEBHOOK_SIGNATURE_TTL_SECONDS = 10 * 60
@@ -241,7 +242,7 @@ async def delete_monitor(request: Request) -> Dict[str, Any]:
     return {"ok": True}
 
 
-@router.post("/webhook/{task_name}")
+@webhook_router.post("/webhook/{task_name}")
 async def webhook(task_name: str, request: Request) -> JSONResponse:
     body_bytes = await request.body()
     body_text = body_bytes.decode("utf-8", errors="replace")

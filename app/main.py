@@ -2,7 +2,7 @@ from fastapi import Depends
 
 from .core import app, require_auth
 from .routes.events import router as events_router
-from .routes.monitor import router as monitor_router
+from .routes.monitor import router as monitor_router, webhook_router
 from .routes.pages import router as pages_router
 from .routes.recommendation import router as recommendation_router
 from .routes.resource import router as resource_router
@@ -21,6 +21,7 @@ app.include_router(tree_router, dependencies=_auth_deps)
 app.include_router(resource_router, dependencies=_auth_deps)
 app.include_router(scraper_router, dependencies=_auth_deps)
 app.include_router(strm_router)
+app.include_router(webhook_router)
 app.include_router(subscription_router, dependencies=_auth_deps)
 app.include_router(tmdb_router, dependencies=_auth_deps)
 app.include_router(events_router, dependencies=_auth_deps)
